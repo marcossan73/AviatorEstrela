@@ -30,6 +30,7 @@ OUTPUT_FILE = os.path.join(BASE_DIR, "resultados_aviator.txt")
 LOG_FILE    = os.path.join(BASE_DIR, "log_execucao.txt")
 PREDICTIONS_FILE = os.path.join(BASE_DIR, "predictions.txt")
 MODEL_FILE_5 = os.path.join(BASE_DIR, "gap_model_5.pkl")
+MODEL_FILE_10 = os.path.join(BASE_DIR, "gap_model_10.pkl")
 MODEL_FILE_50 = os.path.join(BASE_DIR, "gap_model_50.pkl")
 
 INTERVALO_SEGUNDOS = 30
@@ -37,6 +38,7 @@ MAX_REGISTROS = 10000
 
 # Constantes para análise
 THRESHOLD_5 = 5.0
+THRESHOLD_10 = 10.0
 THRESHOLD_50 = 50.0
 WINDOW_SIZE = 5
 PRE_WINDOW = 4
@@ -289,7 +291,13 @@ def analyze_spikes(df, threshold, label):
     median_gap = gaps.median()
 
     # Treinar modelo ML para prever o próximo gap
-    model_file = MODEL_FILE_5 if threshold == THRESHOLD_5 else MODEL_FILE_50
+    if threshold == THRESHOLD_5:
+        model_file = MODEL_FILE_5
+    elif threshold == THRESHOLD_10:
+        model_file = MODEL_FILE_10
+    else:
+        model_file = MODEL_FILE_50
+
     if len(gaps) > 5:
         X = []
         y = []
@@ -327,7 +335,13 @@ def analyze_spikes(df, threshold, label):
     save_prediction(threshold, predicted_next, predicted_early, predicted_late)
 
     # Update dashboard data
-    key = 'spikes_5' if threshold == THRESHOLD_5 else 'spikes_50'
+    if threshold == THRESHOLD_5:
+        key = 'spikes_5'
+    elif threshold == THRESHOLD_10:
+        key = 'spikes_10'
+    else:
+        key = 'spikes_50'
+
     latest_analysis[key] = {
         'total': len(spikes),
         'mean_gap': mean_gap / 60,
@@ -348,6 +362,7 @@ def analyze_trends(df):
     df["rolling_slope"] = df["value"].rolling(WINDOW_SIZE).apply(
         lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan, raw=True
     )
+    df["projection"] = df["rolling_mean"] + df["rolling_slope"]
 
     if not df["rolling_slope"].isna().all():
         last_mean = df["rolling_mean"].iloc[-1]
@@ -365,6 +380,8 @@ def analyze_trends(df):
             print(f"  Projecao proxima {i}: {pred:.2f}")
             if pred > THRESHOLD_5:
                 print(f"    ALERTA: Projecao {i} aponta para valor > 5!")
+            if pred > THRESHOLD_10:
+                print(f"    ALERTA: Projecao {i} aponta para valor > 10!")
             if pred > THRESHOLD_50:
                 print(f"    ALERTA: Projecao {i} aponta para valor > 50!")
 
@@ -372,7 +389,7 @@ def analyze_trends(df):
         latest_analysis['trends'] = {
             'mean': last_mean,
             'slope': last_slope,
-            'projections': [{'value': p, 'alert_5': p > THRESHOLD_5, 'alert_50': p > THRESHOLD_50} for p in projections]
+            'projections': [{'value': p, 'alert_5': p > THRESHOLD_5, 'alert_10': p > THRESHOLD_10, 'alert_50': p > THRESHOLD_50} for p in projections]
         }
 
 def analyze_signatures(df, threshold, label):
@@ -455,8 +472,19 @@ def run_analysis():
     latest_analysis['ultimo'] = f"{df['timestamp'].max()} - Valor: {df['value'].iloc[-1]:.2f}"
 
     last_50_df = df.tail(100)
+    # Ensure trends are calculated before extracting data if available, though analyze_trends is called after, it's ok we can do rudimentary calculations here:
     last_50_formatted = []
-    for _, r in last_50_df.iterrows():
+
+    # Pre-calculate rolling for chart
+    df_chart = df.copy()
+    df_chart["rolling_mean"] = df_chart["value"].rolling(WINDOW_SIZE).mean()
+    df_chart["rolling_slope"] = df_chart["value"].rolling(WINDOW_SIZE).apply(
+        lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan, raw=True
+    )
+    df_chart["projection"] = df_chart["rolling_mean"] + df_chart["rolling_slope"]
+    df_chart_sliced = df_chart.tail(100)
+
+    for _, r in df_chart_sliced.iterrows():
         val = r['value']
         color = '#6c757d' # < 2 (gray)
         if val >= 50:
@@ -465,11 +493,20 @@ def run_analysis():
             color = '#e83e8c' # >= 5 (pink)
         elif val >= 2:
             color = '#28a745' # >= 2 (green)
-        last_50_formatted.append({'value': val, 'time': r['timestamp'].strftime('%H:%M:%S'), 'color': color})
+        last_50_formatted.append({
+            'value': val, 
+            'time': r['timestamp'].strftime('%H:%M:%S'), 
+            'color': color,
+            'rolling_mean': float(r['rolling_mean']) if not pd.isna(r['rolling_mean']) else None,
+            'projection': float(r['projection']) if not pd.isna(r['projection']) else None
+        })
     latest_analysis['last_100'] = last_50_formatted
 
     # Analise para >5
     pred_5 = analyze_spikes(df, THRESHOLD_5, ">5")
+
+    # Analise para >10
+    pred_10 = analyze_spikes(df, THRESHOLD_10, ">10")
 
     # Analise para >50
     pred_50 = analyze_spikes(df, THRESHOLD_50, ">50")
@@ -479,6 +516,7 @@ def run_analysis():
 
     # Assinaturas
     analyze_signatures(df, THRESHOLD_5, ">5")
+    analyze_signatures(df, THRESHOLD_10, ">10")
     analyze_signatures(df, THRESHOLD_50, ">50")
 
     # Verifica e atualiza previsões
@@ -511,7 +549,13 @@ def run_analysis():
                 print(f"\n[ANALYSIS] Prediction Statistics for >{int(thresh)}: Total predictions: {total_predictions}, No completed predictions, Pending: {counts['pendentes']}")
 
             # Update dashboard data
-            key = 'pred_5' if thresh == 5.0 else 'pred_50'
+            if thresh == 5.0:
+                key = 'pred_5'
+            elif thresh == 10.0:
+                key = 'pred_10'
+            else:
+                key = 'pred_50'
+
             latest_predictions[key] = {
                 'total': total_predictions,
                 'hits': counts['acertos'],
@@ -610,8 +654,8 @@ def main():
 
 if __name__ == "__main__":
     app = Flask(__name__)
-    latest_analysis = {'spikes_5': None, 'spikes_50': None, 'trends': None}
-    latest_predictions = {'pred_5': None, 'pred_50': None}
+    latest_analysis = {'spikes_5': None, 'spikes_10': None, 'spikes_50': None, 'trends': None}
+    latest_predictions = {'pred_5': None, 'pred_10': None, 'pred_50': None}
 
     @app.route('/')
     def dashboard():
@@ -637,7 +681,7 @@ if __name__ == "__main__":
                 .kpi h4 { margin: 0 0 10px 0; color: #888; font-size: 14px; text-transform: uppercase; }
                 .kpi-value { font-size: 24px; font-weight: bold; color: #e83e8c; margin: 0; }
 
-                .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+                .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
                 .alert { background-color: #ffeeba; color: #856404; padding: 10px; border-radius: 5px; font-weight: bold; margin-bottom: 15px; }
                 .history-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 15px; }
                 .history-item { padding: 4px 8px; border-radius: 4px; color: #fff; font-size: 12px; font-weight: bold; }
@@ -647,13 +691,15 @@ if __name__ == "__main__":
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>Aviator Strategy</h1>
-                <div><span style="color:#666;font-size:12px;">Última atualização: Últimos 100 registros analisados</span></div>
-            </div>
+            <button id="btn-sound" style="position:fixed; top:10px; right:10px; z-index:9999; padding:8px 12px; background:#28a745; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;"></button>
 
-            <div class="container">
+            <div class="container" style="padding-top: 20px;">
                 <div class="sidebar">
+                    <div class="card" style="text-align: center; font-size: 14px; color: #666;">
+                        <p><strong>Atual:</strong> {{ now }}</p>
+                        <p><strong>Última:</strong> {{ ultimo.split(' - ')[0] if ultimo else 'N/A' }}</p>
+                    </div>
+
                     <div class="card">
                         <h3>Geral</h3>
                         <div class="kpi" style="margin-bottom:10px;">
@@ -672,9 +718,11 @@ if __name__ == "__main__":
                         {% if trends and trends.projections %}
                             {% for proj in trends.projections %}
                                 {% if proj.alert_50 %}
-                                    <div class="alert" style="background-color: #f8d7da; color: #721c24;">ALERTA! Previsão {{ loop.index }} aponta p/ >50</div>
+                                    <div class="alert" data-level="50" style="background-color: #f8d7da; color: #721c24;">ALERTA! Previsão {{ loop.index }} aponta p/ >50</div>
+                                {% elif proj.alert_10 %}
+                                    <div class="alert" data-level="10" style="background-color: #cce5ff; color: #004085;">ALERTA! Previsão {{ loop.index }} aponta p/ >10</div>
                                 {% elif proj.alert_5 %}
-                                    <div class="alert">ALERTA! Previsão {{ loop.index }} aponta p/ >5</div>
+                                    <div class="alert" data-level="5">ALERTA! Previsão {{ loop.index }} aponta p/ >5</div>
                                 {% endif %}
                             {% endfor %}
                             <p><strong>Média Movel:</strong> {{ "%.2f"|format(trends.mean) }}</p>
@@ -704,7 +752,7 @@ if __name__ == "__main__":
                         </div>
                     </div>
 
-                    <div class="grid-2">
+                    <div class="grid-3">
                         <div class="card">
                             <h3>Spikes > 5</h3>
                             <p><strong>Total Picos:</strong> {{ spikes_5.total if spikes_5 else 'N/A' }}</p>
@@ -716,11 +764,21 @@ if __name__ == "__main__":
                             <p style="font-size:12px;color:#666;">Performance Previsões >5: <br>Acertos: {{ pred_5.hits if pred_5 else 'N/A' }} / Erros: {{ pred_5.misses if pred_5 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_5.rate) if pred_5 and pred_5.rate is not none else 'N/A' }}%</p>
                         </div>
                         <div class="card">
+                            <h3>Spikes > 10</h3>
+                            <p><strong>Total Picos:</strong> {{ spikes_10.total if spikes_10 else 'N/A' }}</p>
+                            <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_10.mean_gap) if spikes_10 else 'N/A' }} min</p>
+                            <p><strong>Previsão ML:</strong> {{ "%.2f"|format(spikes_10.predicted_gap) if spikes_10 else 'N/A' }} min</p>
+                            <p><strong>Próximo Pico:</strong> <span style="color:#007bff;font-weight:bold;">{{ spikes_10.predicted_next if spikes_10 else 'N/A' }}</span></p>
+                            <p><strong>Janela:</strong> {{ spikes_10.window if spikes_10 else 'N/A' }}</p>
+                            <br>
+                            <p style="font-size:12px;color:#666;">Performance Previsões >10: <br>Acertos: {{ pred_10.hits if pred_10 else 'N/A' }} / Erros: {{ pred_10.misses if pred_10 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_10.rate) if pred_10 and pred_10.rate is not none else 'N/A' }}%</p>
+                        </div>
+                        <div class="card">
                             <h3>Spikes > 50</h3>
                             <p><strong>Total Picos:</strong> {{ spikes_50.total if spikes_50 else 'N/A' }}</p>
                             <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_50.mean_gap) if spikes_50 else 'N/A' }} min</p>
                             <p><strong>Previsão ML:</strong> {{ "%.2f"|format(spikes_50.predicted_gap) if spikes_50 else 'N/A' }} min</p>
-                            <p><strong>Próximo Pico:</strong> <span style="color:#6f42c1;font-weight:bold;">{{ spikes_50.predicted_next if spikes_50 else 'N/A' }}</span></p>
+                            <p><strong>Próximo Pico:</strong> <span id="next-spike-50" style="color:#6f42c1;font-weight:bold;">{{ spikes_50.predicted_next if spikes_50 else 'N/A' }}</span></p>
                             <p><strong>Janela:</strong> {{ spikes_50.window if spikes_50 else 'N/A' }}</p>
                             <br>
                             <p style="font-size:12px;color:#666;">Performance Previsões >50: <br>Acertos: {{ pred_50.hits if pred_50 else 'N/A' }} / Erros: {{ pred_50.misses if pred_50 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_50.rate) if pred_50 and pred_50.rate is not none else 'N/A' }}%</p>
@@ -739,6 +797,8 @@ if __name__ == "__main__":
                     const labels = chartData.map(d => d.time);
                     const values = chartData.map(d => d.value);
                     const colors = chartData.map(d => d.color);
+                    const rollingMeans = chartData.map(d => d.rolling_mean);
+                    const projections = chartData.map(d => d.projection);
 
                     new Chart(ctx, {
                         type: 'line',
@@ -754,6 +814,26 @@ if __name__ == "__main__":
                                 pointRadius: 4,
                                 fill: false,
                                 tension: 0.1
+                            },
+                            {
+                                label: 'Média Móvel (5)',
+                                data: rollingMeans,
+                                borderColor: '#ffc107',
+                                borderWidth: 1,
+                                borderDash: [5, 5],
+                                pointRadius: 0,
+                                fill: false,
+                                tension: 0.2
+                            },
+                            {
+                                label: 'Projeção de Tendência',
+                                data: projections,
+                                borderColor: '#dc3545',
+                                borderWidth: 1,
+                                borderDash: [2, 2],
+                                pointRadius: 0,
+                                fill: false,
+                                tension: 0.2
                             }]
                         },
                         options: {
@@ -769,16 +849,120 @@ if __name__ == "__main__":
                             },
                             plugins: {
                                 legend: {
-                                    display: false
+                                    display: true,
+                                    position: 'top',
+                                    labels: {
+                                        boxWidth: 12,
+                                        font: {
+                                            size: 10
+                                        }
+                                    }
                                 }
                             }
                         }
                     });
                 }
             </script>
+            <script>
+                // Controle de Audio para Alertas
+                const btnSound = document.getElementById('btn-sound');
+                let soundEnabled = localStorage.getItem('sound_enabled') === 'true';
+
+                function updateBtn() {
+                    if(!btnSound) return;
+                    btnSound.innerText = soundEnabled ? "🔊 Som Ativado" : "🔇 Ativar Som";
+                    btnSound.style.backgroundColor = soundEnabled ? "#28a745" : "#6c757d";
+                }
+
+                if(btnSound) {
+                    updateBtn();
+                    btnSound.addEventListener('click', () => {
+                        soundEnabled = !soundEnabled;
+                        localStorage.setItem('sound_enabled', soundEnabled);
+                        updateBtn();
+                        if(soundEnabled) playChangeSound(); // Toca som de teste para garantir interação
+                    });
+                }
+
+                function playAlertSound(times) {
+                    if(!soundEnabled || times <= 0) return;
+                    try {
+                        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                        const now = ctx.currentTime;
+                        for (let i = 0; i < times; i++) {
+                            const startTime = now + (i * 0.6); // 0.6s de intervalo entre cada loop
+                            const osc = ctx.createOscillator();
+                            osc.type = 'sawtooth';
+                            osc.frequency.setValueAtTime(440, startTime);
+                            osc.frequency.exponentialRampToValueAtTime(880, startTime + 0.2);
+
+                            const gain = ctx.createGain();
+                            gain.gain.setValueAtTime(0.1, startTime);
+                            gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.4);
+
+                            osc.connect(gain);
+                            gain.connect(ctx.destination);
+                            osc.start(startTime);
+                            osc.stop(startTime + 0.4);
+                        }
+                    } catch(e) { console.error('Erro de audio:', e); }
+                }
+
+                function playChangeSound() {
+                    if(!soundEnabled) return;
+                    try {
+                        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                        const osc = ctx.createOscillator();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(600, ctx.currentTime);
+
+                        const gain = ctx.createGain();
+                        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start();
+                        osc.stop(ctx.currentTime + 0.5);
+                    } catch(e) { console.error('Erro de audio:', e); }
+                }
+
+                window.addEventListener('DOMContentLoaded', () => {
+                    let alerts = document.querySelectorAll('.alert');
+                    let maxLevel = 0;
+                    alerts.forEach(a => {
+                        let level = parseInt(a.getAttribute('data-level')) || 0;
+                        if (level > maxLevel) maxLevel = level;
+                    });
+
+                    let beepCount = 0;
+                    if (maxLevel === 50) beepCount = 20;
+                    else if (maxLevel === 10) beepCount = 10;
+                    else if (maxLevel === 5) beepCount = 5;
+
+                    let nextSpike50El = document.getElementById('next-spike-50');
+                    let currentSpike50 = nextSpike50El ? nextSpike50El.innerText.trim() : 'N/A';
+                    let lastSpike50 = localStorage.getItem('last_spike_50');
+
+                    let spikeChanged = false;
+                    if (currentSpike50 !== 'N/A' && lastSpike50 && currentSpike50 !== lastSpike50) {
+                        spikeChanged = true;
+                    }
+                    if (currentSpike50 !== 'N/A') {
+                        localStorage.setItem('last_spike_50', currentSpike50);
+                    }
+
+                    // Tocar alarmes (se ativado pelo usuário)
+                    if (beepCount > 0) {
+                        setTimeout(() => playAlertSound(beepCount), 500);
+                    } else if (spikeChanged) {
+                        setTimeout(playChangeSound, 500);
+                    }
+                });
+            </script>
         </body>
         </html>
         """
-        return render_template_string(html, **latest_analysis, **latest_predictions)
+        return render_template_string(html, now=datetime.now().strftime("%d/%m/%Y %H:%M:%S"), **latest_analysis, **latest_predictions)
 
     main()
