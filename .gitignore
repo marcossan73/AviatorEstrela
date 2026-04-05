@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/AviatorEstrela/log_execucao.txt
+/AviatorEstrela/predictions.txt
+/AviatorEstrela/resultados_aviator.txt
