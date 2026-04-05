@@ -2,6 +2,7 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from datetime import date, datetime, timedelta
@@ -13,6 +14,7 @@ from sklearn.ensemble import RandomForestRegressor
 import joblib
 from flask import Flask, render_template_string
 import threading
+from webdriver_manager.chrome import ChromeDriverManager
 
 LOGIN_URL = "https://www.tipminer.com/br/historico/estrelabet/aviator"
 URL_50 = (
@@ -33,7 +35,7 @@ MODEL_FILE_50 = os.path.join(BASE_DIR, "gap_model_50.pkl")
 INTERVALO_SEGUNDOS = 30
 MAX_REGISTROS = 10000
 
-# Constantes para an?lise
+# Constantes para análise
 THRESHOLD_5 = 5.0
 THRESHOLD_50 = 50.0
 WINDOW_SIZE = 5
@@ -59,23 +61,21 @@ def log(msg):
 def iniciar_driver():
     options = Options()
     options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-features=VizDisplayCompositor")
-    options.add_argument("--disable-gpu")
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-plugins")
     options.add_argument("--disable-images")
     options.add_argument("--no-first-run")
+    options.add_argument("--remote-debugging-port=9222")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
-    driver = webdriver.Chrome(options=options)
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/134.0.0.0 Safari/537.36"
+    )
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     driver.set_page_load_timeout(120)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
@@ -236,7 +236,7 @@ def salvar_arquivo(registros):
 
 
 # ---------------------------------------------------------------------------
-# Fun??es de an?lise
+# Funções de análise
 # ---------------------------------------------------------------------------
 
 def load_data_for_analysis():
@@ -288,7 +288,7 @@ def analyze_spikes(df, threshold, label):
         std_gap = 0.0
     median_gap = gaps.median()
 
-    # Treinar modelo ML para prever o pr?ximo gap
+    # Treinar modelo ML para prever o próximo gap
     model_file = MODEL_FILE_5 if threshold == THRESHOLD_5 else MODEL_FILE_50
     if len(gaps) > 5:
         X = []
@@ -301,7 +301,7 @@ def analyze_spikes(df, threshold, label):
             model.fit(X, y)
             joblib.dump(model, model_file)
 
-    # Prever o pr?ximo gap usando ML ou estat?stica
+    # Prever o próximo gap usando ML ou estatística
     if os.path.exists(model_file) and len(gaps) >= 3:
         model = joblib.load(model_file)
         features = gaps.iloc[-3:].values
@@ -323,7 +323,7 @@ def analyze_spikes(df, threshold, label):
     print(f"  Proximo pico estimado: {predicted_next.strftime('%d/%m/%Y %H:%M:%S')}")
     print(f"  Janela provavel: {predicted_early.strftime('%H:%M:%S')} -> {predicted_late.strftime('%H:%M:%S')}")
 
-    # Salva a previs?o
+    # Salva a previsão
     save_prediction(threshold, predicted_next, predicted_early, predicted_late)
 
     # Update dashboard data
@@ -357,7 +357,7 @@ def analyze_trends(df):
         print(f"  Media: {last_mean:.2f}")
         print(f"  Inclinacao: {last_slope:.4f}")
 
-        # Proje??es para os pr?ximos 4 resultados
+        # Proje??es para os próximos 4 resultados
         projections = []
         for i in range(1, 5):
             pred = last_mean + i * last_slope
@@ -454,6 +454,20 @@ def run_analysis():
     latest_analysis['periodo'] = f"{df['timestamp'].min()} -> {df['timestamp'].max()}"
     latest_analysis['ultimo'] = f"{df['timestamp'].max()} - Valor: {df['value'].iloc[-1]:.2f}"
 
+    last_50_df = df.tail(100)
+    last_50_formatted = []
+    for _, r in last_50_df.iterrows():
+        val = r['value']
+        color = '#6c757d' # < 2 (gray)
+        if val >= 50:
+            color = '#6f42c1' # >= 50 (purple)
+        elif val >= 5:
+            color = '#e83e8c' # >= 5 (pink)
+        elif val >= 2:
+            color = '#28a745' # >= 2 (green)
+        last_50_formatted.append({'value': val, 'time': r['timestamp'].strftime('%H:%M:%S'), 'color': color})
+    latest_analysis['last_100'] = last_50_formatted
+
     # Analise para >5
     pred_5 = analyze_spikes(df, THRESHOLD_5, ">5")
 
@@ -467,10 +481,10 @@ def run_analysis():
     analyze_signatures(df, THRESHOLD_5, ">5")
     analyze_signatures(df, THRESHOLD_50, ">50")
 
-    # Verifica e atualiza previs?es
+    # Verifica e atualiza previsões
     check_predictions(df)
 
-    # Exibe estat?sticas de previs?es separadas por threshold
+    # Exibe estatísticas de previsões separadas por threshold
     if os.path.exists(PREDICTIONS_FILE):
         stats = {}
         with open(PREDICTIONS_FILE, "r", encoding="utf-8") as f:
@@ -543,7 +557,7 @@ def main():
         log("Proceeding without login.")
 
     try:
-        # An?lise inicial se arquivo j? existe
+        # Análise inicial se arquivo já existe
         if os.path.exists(OUTPUT_FILE):
             run_analysis()
 
@@ -552,39 +566,37 @@ def main():
             ciclo += 1
             log("--- Ciclo " + str(ciclo) + " ---")
 
-            # Capturar dados a cada 3 ciclos (90 segundos)
-            if ciclo % 3 == 1:
-                try:
-                    novos = capturar_ultimos(driver)
-                    log("Capturados " + str(len(novos)) + " registros da pagina.")
+            # Capturar dados a cada ciclo (30 segundos)
+            try:
+                novos = capturar_ultimos(driver)
+                log("Capturados " + str(len(novos)) + " registros da pagina.")
 
-                    existentes = carregar_existentes()
-                    mesclados, adicionados = mesclar(existentes, novos)
-                    salvar_arquivo(mesclados)
+                existentes = carregar_existentes()
+                mesclados, adicionados = mesclar(existentes, novos)
+                salvar_arquivo(mesclados)
 
-                    log("Adicionados " + str(adicionados) + " novos registros. "
-                        "Total no arquivo: " + str(len(mesclados)) + ".")
+                log("Adicionados " + str(adicionados) + " novos registros. "
+                    "Total no arquivo: " + str(len(mesclados)) + ".")
 
-                except Exception as e:
-                    log("ERRO no ciclo " + str(ciclo) + ": " + str(e))
-                    # Se for timeout, reinicie o driver e fa?a login novamente
-                    if "timeout" in str(e).lower():
-                        log("Timeout detectado, reiniciando driver e fazendo login...")
-                        driver.quit()
-                        driver = iniciar_driver()
-                        try:
-                            fazer_login(driver)
-                        except Exception as e2:
-                            log("ERRO ao relogar apos timeout: " + str(e2))
-                            # Se falhar, continue sem driver ou algo, mas por enquanto log
-                    else:
-                        # Tenta relogar se a sessao expirou
-                        try:
-                            fazer_login(driver)
-                        except Exception as e2:
-                            log("ERRO ao relogar: " + str(e2))
+            except Exception as e:
+                log("ERRO no ciclo " + str(ciclo) + ": " + str(e))
+                # Se for timeout, reinicie o driver e faça login novamente
+                if "timeout" in str(e).lower():
+                    log("Timeout detectado, reiniciando driver e fazendo login...")
+                    driver.quit()
+                    driver = iniciar_driver()
+                    try:
+                        fazer_login(driver)
+                    except Exception as e2:
+                        log("ERRO ao relogar apos timeout: " + str(e2))
+                else:
+                    # Tenta relogar se a sessao expirou
+                    try:
+                        fazer_login(driver)
+                    except Exception as e2:
+                        log("ERRO ao relogar: " + str(e2))
 
-            # Executar an?lise a cada ciclo (60 segundos)
+            # Executar análise após a captura (30 segundos)
             run_analysis()
 
             log("Aguardando " + str(INTERVALO_SEGUNDOS) + " segundos...")
@@ -598,63 +610,172 @@ def main():
 
 if __name__ == "__main__":
     app = Flask(__name__)
-    latest_analysis = {}
-    latest_predictions = {}
+    latest_analysis = {'spikes_5': None, 'spikes_50': None, 'trends': None}
+    latest_predictions = {'pred_5': None, 'pred_50': None}
 
     @app.route('/')
     def dashboard():
+        import json
         html = """
-        <!DOCTYPE html>`
-        <html lang="en">
+        <!DOCTYPE html>
+        <html lang="pt-BR">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Aviator Dashboard</title>
+            <title>Aviator Analytics Dashboard</title>
             <meta http-equiv="refresh" content="30">
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
             <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                h1, h2, h3 { color: #333; }
-                .section { margin-bottom: 20px; border: 1px solid #ccc; padding: 10px; }
-                .alert { color: red; font-weight: bold; }
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f4f7f6; color: #333; }
+                .header { background-color: #fff; padding: 20px 40px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+                .header h1 { margin: 0; color: #e83e8c; font-size: 24px; }
+                .container { display: flex; flex-wrap: wrap; gap: 20px; padding: 0 40px 40px 40px; }
+                .sidebar { flex: 1; min-width: 250px; display: flex; flex-direction: column; gap: 20px; }
+                .main-content { flex: 3; min-width: 600px; display: flex; flex-direction: column; gap: 20px; }
+                .card { background: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); padding: 20px; }
+                .kpi { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; border: 1px solid #eee; border-radius: 8px; padding: 15px; }
+                .kpi h4 { margin: 0 0 10px 0; color: #888; font-size: 14px; text-transform: uppercase; }
+                .kpi-value { font-size: 24px; font-weight: bold; color: #e83e8c; margin: 0; }
+
+                .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+                .alert { background-color: #ffeeba; color: #856404; padding: 10px; border-radius: 5px; font-weight: bold; margin-bottom: 15px; }
+                .history-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 15px; }
+                .history-item { padding: 4px 8px; border-radius: 4px; color: #fff; font-size: 12px; font-weight: bold; }
+
+                h2, h3 { color: #444; margin-top: 0; }
+                p { margin: 8px 0; font-size: 14px; }
             </style>
         </head>
         <body>
-            <h1>Aviator Analysis Dashboard</h1>
-            <div class="section">
-                <h2>Latest Analysis</h2>
-                <p><strong>Total registros:</strong> {{ total_registros }}</p>
-                <p><strong>Periodo:</strong> {{ periodo }}</p>
-                <p><strong>Ultimo registro:</strong> {{ ultimo }}</p>
+            <div class="header">
+                <h1>Aviator Strategy</h1>
+                <div><span style="color:#666;font-size:12px;">Última atualização: Últimos 100 registros analisados</span></div>
             </div>
-            <div class="section">
-                <h3>Spikes >5</h3>
-                <p><strong>Total picos:</strong> {{ spikes_5.total if spikes_5 else 'N/A' }}</p>
-                <p><strong>Intervalo medio:</strong> {{ "%.2f"|format(spikes_5.mean_gap) if spikes_5 else 'N/A' }} min</p>
-                <p><strong>Proximo gap previsto (ML):</strong> {{ "%.2f"|format(spikes_5.predicted_gap) if spikes_5 else 'N/A' }} min</p>
-                <p><strong>Proximo pico estimado:</strong> {{ spikes_5.predicted_next if spikes_5 else 'N/A' }}</p>
-                <p><strong>Janela provavel:</strong> {{ spikes_5.window if spikes_5 else 'N/A' }}</p>
+
+            <div class="container">
+                <div class="sidebar">
+                    <div class="card">
+                        <h3>Geral</h3>
+                        <div class="kpi" style="margin-bottom:10px;">
+                            <h4>Total Registros</h4>
+                            <p class="kpi-value">{{ total_registros }}</p>
+                        </div>
+                        <div class="kpi" style="margin-bottom:10px;">
+                            <h4>Último Valor</h4>
+                            <p class="kpi-value" style="color:#333">{{ ultimo.split(' - ')[1] if ultimo else 'N/A' }}</p>
+                        </div>
+                        <p style="font-size:12px;text-align:center;color:#666;">Período: {{ periodo }}</p>
+                    </div>
+
+                    <div class="card">
+                        <h3>Alertas & Tendências</h3>
+                        {% if trends and trends.projections %}
+                            {% for proj in trends.projections %}
+                                {% if proj.alert_50 %}
+                                    <div class="alert" style="background-color: #f8d7da; color: #721c24;">ALERTA! Previsão {{ loop.index }} aponta p/ >50</div>
+                                {% elif proj.alert_5 %}
+                                    <div class="alert">ALERTA! Previsão {{ loop.index }} aponta p/ >5</div>
+                                {% endif %}
+                            {% endfor %}
+                            <p><strong>Média Movel:</strong> {{ "%.2f"|format(trends.mean) }}</p>
+                            <p><strong>Inclinação:</strong> {{ "%.4f"|format(trends.slope) }}</p>
+                            <p><strong>Próximas 4 Projeções:</strong> 
+                            {% for proj in trends.projections %}
+                                {{ "%.2f"|format(proj.value) }} {% if not loop.last %} | {% endif %}
+                            {% endfor %}
+                            </p>
+                        {% else %}
+                            <p>Análise em andamento...</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="main-content">
+                    <div class="card">
+                        <h3>Últimas 100 Ocorrências</h3>
+                        <canvas id="historyChart" width="400" height="80"></canvas>
+
+                        <div class="history-list">
+                            {% if last_100 %}
+                                {% for item in last_100|reverse %}
+                                    <span class="history-item" style="background-color: {{ item.color }};" title="{{ item.time }}">{{ "%.2f"|format(item.value) }}x</span>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="card">
+                            <h3>Spikes > 5</h3>
+                            <p><strong>Total Picos:</strong> {{ spikes_5.total if spikes_5 else 'N/A' }}</p>
+                            <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_5.mean_gap) if spikes_5 else 'N/A' }} min</p>
+                            <p><strong>Previsão ML:</strong> {{ "%.2f"|format(spikes_5.predicted_gap) if spikes_5 else 'N/A' }} min</p>
+                            <p><strong>Próximo Pico:</strong> <span style="color:#e83e8c;font-weight:bold;">{{ spikes_5.predicted_next if spikes_5 else 'N/A' }}</span></p>
+                            <p><strong>Janela:</strong> {{ spikes_5.window if spikes_5 else 'N/A' }}</p>
+                            <br>
+                            <p style="font-size:12px;color:#666;">Performance Previsões >5: <br>Acertos: {{ pred_5.hits if pred_5 else 'N/A' }} / Erros: {{ pred_5.misses if pred_5 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_5.rate) if pred_5 and pred_5.rate is not none else 'N/A' }}%</p>
+                        </div>
+                        <div class="card">
+                            <h3>Spikes > 50</h3>
+                            <p><strong>Total Picos:</strong> {{ spikes_50.total if spikes_50 else 'N/A' }}</p>
+                            <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_50.mean_gap) if spikes_50 else 'N/A' }} min</p>
+                            <p><strong>Previsão ML:</strong> {{ "%.2f"|format(spikes_50.predicted_gap) if spikes_50 else 'N/A' }} min</p>
+                            <p><strong>Próximo Pico:</strong> <span style="color:#6f42c1;font-weight:bold;">{{ spikes_50.predicted_next if spikes_50 else 'N/A' }}</span></p>
+                            <p><strong>Janela:</strong> {{ spikes_50.window if spikes_50 else 'N/A' }}</p>
+                            <br>
+                            <p style="font-size:12px;color:#666;">Performance Previsões >50: <br>Acertos: {{ pred_50.hits if pred_50 else 'N/A' }} / Erros: {{ pred_50.misses if pred_50 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_50.rate) if pred_50 and pred_50.rate is not none else 'N/A' }}%</p>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="section">
-                <h3>Spikes >50</h3>
-                <p><strong>Total picos:</strong> {{ spikes_50.total if spikes_50 else 'N/A' }}</p>
-                <p><strong>Intervalo medio:</strong> {{ "%.2f"|format(spikes_50.mean_gap) if spikes_50 else 'N/A' }} min</p>
-                <p><strong>Proximo gap previsto (ML):</strong> {{ "%.2f"|format(spikes_50.predicted_gap) if spikes_50 else 'N/A' }} min</p>
-                <p><strong>Proximo pico estimado:</strong> {{ spikes_50.predicted_next if spikes_50 else 'N/A' }}</p>
-                <p><strong>Janela provavel:</strong> {{ spikes_50.window if spikes_50 else 'N/A' }}</p>
-            </div>
-            <div class="section">
-                <h3>Tendencia Rolling Window</h3>
-                <p><strong>Media:</strong> {{ "%.2f"|format(trends.mean) if trends else 'N/A' }}</p>
-                <p><strong>Inclinacao:</strong> {{ "%.4f"|format(trends.slope) if trends else 'N/A' }}</p>
-                {% for proj in trends.projections %}
-                <p><strong>Projecao proxima {{ loop.index }}:</strong> {{ "%.2f"|format(proj.value) }} {% if proj.alert_5 %} <span class="alert">ALERTA >5!</span> {% endif %} {% if proj.alert_50 %} <span class="alert">ALERTA >50!</span> {% endif %}</p>
-                {% endfor %}
-            </div>
-            <div class="section">
-                <h3>Prediction Statistics</h3>
-                <p><strong>For >5:</strong> Total: {{ pred_5.total }}, Hits: {{ pred_5.hits }}, Misses: {{ pred_5.misses }}, Hit Rate: {{ "%.1f"|format(pred_5.rate) }}%, Pending: {{ pred_5.pending }}</p>
-                <p><strong>For >50:</strong> Total: {{ pred_50.total }}, Hits: {{ pred_50.hits }}, Misses: {{ pred_50.misses }}, Hit Rate: {{ "%.1f"|format(pred_50.rate) }}%, Pending: {{ pred_50.pending }}</p>
-            </div>
+
+            <script>
+                const canvas = document.getElementById('historyChart');
+                if(canvas) {
+                    const ctx = canvas.getContext('2d');
+                    const lastData = {{ last_100|tojson if last_100 else '[]' }};
+                    const chartData = lastData.slice(-50); // Mantém exibição gráfica em 50
+
+                    const labels = chartData.map(d => d.time);
+                    const values = chartData.map(d => d.value);
+                    const colors = chartData.map(d => d.color);
+
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: 'Multiplicador',
+                                data: values,
+                                borderColor: '#0056b3',
+                                borderWidth: 2,
+                                pointBackgroundColor: colors,
+                                pointBorderColor: '#fff',
+                                pointRadius: 4,
+                                fill: false,
+                                tension: 0.1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    suggestedMax: 10
+                                },
+                                x: {
+                                    display: false
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                }
+                            }
+                        }
+                    });
+                }
+            </script>
         </body>
         </html>
         """

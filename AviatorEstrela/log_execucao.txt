@@ -29,3 +29,256 @@
 [05/04/2026 12:00:51] --- Ciclo 3 ---
 [05/04/2026 12:00:52] Aguardando 30 segundos...
 [05/04/2026 12:01:17] Servico encerrado pelo usuario.
+[05/04/2026 12:13:05] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:13:07] Abrindo pagina de login...
+[05/04/2026 12:13:22] Login realizado com sucesso.
+[05/04/2026 12:13:22] Login realizado com sucesso.
+[05/04/2026 12:13:23] --- Ciclo 1 ---
+[05/04/2026 12:13:33] Capturados 50 registros da pagina.
+[05/04/2026 12:13:33] Arquivo salvo com 143 registros.
+[05/04/2026 12:13:33] Adicionados 37 novos registros. Total no arquivo: 143.
+[05/04/2026 12:13:34] Aguardando 30 segundos...
+[05/04/2026 12:14:04] --- Ciclo 2 ---
+[05/04/2026 12:14:13] Capturados 50 registros da pagina.
+[05/04/2026 12:14:13] Arquivo salvo com 144 registros.
+[05/04/2026 12:14:13] Adicionados 1 novos registros. Total no arquivo: 144.
+[05/04/2026 12:14:13] Aguardando 30 segundos...
+[05/04/2026 12:14:43] --- Ciclo 3 ---
+[05/04/2026 12:14:54] Capturados 50 registros da pagina.
+[05/04/2026 12:14:54] Arquivo salvo com 146 registros.
+[05/04/2026 12:14:54] Adicionados 2 novos registros. Total no arquivo: 146.
+[05/04/2026 12:14:55] Aguardando 30 segundos...
+[05/04/2026 12:15:04] Servico encerrado pelo usuario.
+[05/04/2026 12:17:15] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:17:17] Abrindo pagina de login...
+[05/04/2026 12:17:34] Login realizado com sucesso.
+[05/04/2026 12:17:34] Login realizado com sucesso.
+[05/04/2026 12:17:36] --- Ciclo 1 ---
+[05/04/2026 12:17:49] Capturados 50 registros da pagina.
+[05/04/2026 12:17:49] Arquivo salvo com 153 registros.
+[05/04/2026 12:17:49] Adicionados 7 novos registros. Total no arquivo: 153.
+[05/04/2026 12:17:50] Aguardando 30 segundos...
+[05/04/2026 12:18:20] --- Ciclo 2 ---
+[05/04/2026 12:18:31] Capturados 50 registros da pagina.
+[05/04/2026 12:18:31] Arquivo salvo com 154 registros.
+[05/04/2026 12:18:31] Adicionados 1 novos registros. Total no arquivo: 154.
+[05/04/2026 12:18:31] Aguardando 30 segundos...
+[05/04/2026 12:19:01] --- Ciclo 3 ---
+[05/04/2026 12:19:13] Capturados 50 registros da pagina.
+[05/04/2026 12:19:13] Arquivo salvo com 155 registros.
+[05/04/2026 12:19:13] Adicionados 1 novos registros. Total no arquivo: 155.
+[05/04/2026 12:19:15] Aguardando 30 segundos...
+[05/04/2026 12:19:45] --- Ciclo 4 ---
+[05/04/2026 12:19:56] Capturados 50 registros da pagina.
+[05/04/2026 12:19:56] Arquivo salvo com 158 registros.
+[05/04/2026 12:19:56] Adicionados 3 novos registros. Total no arquivo: 158.
+[05/04/2026 12:19:56] Aguardando 30 segundos...
+[05/04/2026 12:20:26] --- Ciclo 5 ---
+[05/04/2026 12:20:36] Capturados 50 registros da pagina.
+[05/04/2026 12:20:36] Arquivo salvo com 161 registros.
+[05/04/2026 12:20:36] Adicionados 3 novos registros. Total no arquivo: 161.
+[05/04/2026 12:20:37] Aguardando 30 segundos...
+[05/04/2026 12:21:07] --- Ciclo 6 ---
+[05/04/2026 12:21:18] Capturados 50 registros da pagina.
+[05/04/2026 12:21:18] Arquivo salvo com 163 registros.
+[05/04/2026 12:21:18] Adicionados 2 novos registros. Total no arquivo: 163.
+[05/04/2026 12:21:18] Aguardando 30 segundos...
+[05/04/2026 12:21:48] --- Ciclo 7 ---
+[05/04/2026 12:21:59] Capturados 50 registros da pagina.
+[05/04/2026 12:21:59] Arquivo salvo com 167 registros.
+[05/04/2026 12:21:59] Adicionados 4 novos registros. Total no arquivo: 167.
+[05/04/2026 12:21:59] Aguardando 30 segundos...
+[05/04/2026 12:22:29] --- Ciclo 8 ---
+[05/04/2026 12:22:38] Capturados 50 registros da pagina.
+[05/04/2026 12:22:38] Arquivo salvo com 169 registros.
+[05/04/2026 12:22:38] Adicionados 2 novos registros. Total no arquivo: 169.
+[05/04/2026 12:22:39] Aguardando 30 segundos...
+[05/04/2026 12:23:09] --- Ciclo 9 ---
+[05/04/2026 12:23:19] Capturados 50 registros da pagina.
+[05/04/2026 12:23:19] Arquivo salvo com 172 registros.
+[05/04/2026 12:23:19] Adicionados 3 novos registros. Total no arquivo: 172.
+[05/04/2026 12:23:19] Aguardando 30 segundos...
+[05/04/2026 12:23:49] --- Ciclo 10 ---
+[05/04/2026 12:23:58] Capturados 50 registros da pagina.
+[05/04/2026 12:23:58] Arquivo salvo com 174 registros.
+[05/04/2026 12:23:58] Adicionados 2 novos registros. Total no arquivo: 174.
+[05/04/2026 12:23:59] Aguardando 30 segundos...
+[05/04/2026 12:24:29] --- Ciclo 11 ---
+[05/04/2026 12:24:38] Capturados 50 registros da pagina.
+[05/04/2026 12:24:38] Arquivo salvo com 177 registros.
+[05/04/2026 12:24:38] Adicionados 3 novos registros. Total no arquivo: 177.
+[05/04/2026 12:24:39] Aguardando 30 segundos...
+[05/04/2026 12:25:09] --- Ciclo 12 ---
+[05/04/2026 12:25:18] Capturados 50 registros da pagina.
+[05/04/2026 12:25:18] Arquivo salvo com 179 registros.
+[05/04/2026 12:25:18] Adicionados 2 novos registros. Total no arquivo: 179.
+[05/04/2026 12:25:19] Aguardando 30 segundos...
+[05/04/2026 12:25:49] --- Ciclo 13 ---
+[05/04/2026 12:25:59] Capturados 50 registros da pagina.
+[05/04/2026 12:25:59] Arquivo salvo com 180 registros.
+[05/04/2026 12:25:59] Adicionados 1 novos registros. Total no arquivo: 180.
+[05/04/2026 12:26:00] Aguardando 30 segundos...
+[05/04/2026 12:26:30] --- Ciclo 14 ---
+[05/04/2026 12:26:39] Capturados 50 registros da pagina.
+[05/04/2026 12:26:39] Arquivo salvo com 182 registros.
+[05/04/2026 12:26:39] Adicionados 2 novos registros. Total no arquivo: 182.
+[05/04/2026 12:26:40] Aguardando 30 segundos...
+[05/04/2026 12:27:10] --- Ciclo 15 ---
+[05/04/2026 12:27:20] Capturados 50 registros da pagina.
+[05/04/2026 12:27:20] Arquivo salvo com 182 registros.
+[05/04/2026 12:27:20] Adicionados 0 novos registros. Total no arquivo: 182.
+[05/04/2026 12:27:21] Aguardando 30 segundos...
+[05/04/2026 12:27:51] --- Ciclo 16 ---
+[05/04/2026 12:28:02] Capturados 50 registros da pagina.
+[05/04/2026 12:28:02] Arquivo salvo com 184 registros.
+[05/04/2026 12:28:02] Adicionados 2 novos registros. Total no arquivo: 184.
+[05/04/2026 12:28:02] Aguardando 30 segundos...
+[05/04/2026 12:28:32] --- Ciclo 17 ---
+[05/04/2026 12:28:42] Capturados 50 registros da pagina.
+[05/04/2026 12:28:42] Arquivo salvo com 186 registros.
+[05/04/2026 12:28:42] Adicionados 2 novos registros. Total no arquivo: 186.
+[05/04/2026 12:28:43] Aguardando 30 segundos...
+[05/04/2026 12:29:13] --- Ciclo 18 ---
+[05/04/2026 12:29:23] Capturados 50 registros da pagina.
+[05/04/2026 12:29:23] Arquivo salvo com 189 registros.
+[05/04/2026 12:29:23] Adicionados 3 novos registros. Total no arquivo: 189.
+[05/04/2026 12:29:24] Aguardando 30 segundos...
+[05/04/2026 12:29:54] --- Ciclo 19 ---
+[05/04/2026 12:30:03] Capturados 50 registros da pagina.
+[05/04/2026 12:30:03] Arquivo salvo com 190 registros.
+[05/04/2026 12:30:03] Adicionados 1 novos registros. Total no arquivo: 190.
+[05/04/2026 12:30:04] Aguardando 30 segundos...
+[05/04/2026 12:30:34] --- Ciclo 20 ---
+[05/04/2026 12:30:44] Capturados 50 registros da pagina.
+[05/04/2026 12:30:44] Arquivo salvo com 193 registros.
+[05/04/2026 12:30:44] Adicionados 3 novos registros. Total no arquivo: 193.
+[05/04/2026 12:30:44] Aguardando 30 segundos...
+[05/04/2026 12:31:14] --- Ciclo 21 ---
+[05/04/2026 12:31:24] Capturados 50 registros da pagina.
+[05/04/2026 12:31:24] Arquivo salvo com 196 registros.
+[05/04/2026 12:31:24] Adicionados 3 novos registros. Total no arquivo: 196.
+[05/04/2026 12:31:24] Aguardando 30 segundos...
+[05/04/2026 12:31:29] Servico encerrado pelo usuario.
+[05/04/2026 12:42:29] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:43:19] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:44:52] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:45:47] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:46:24] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:47:06] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:47:10] Abrindo pagina de login...
+[05/04/2026 12:47:25] Login realizado com sucesso.
+[05/04/2026 12:47:25] Login realizado com sucesso.
+[05/04/2026 12:47:26] --- Ciclo 1 ---
+[05/04/2026 12:47:36] Capturados 50 registros da pagina.
+[05/04/2026 12:47:36] Arquivo salvo com 240 registros.
+[05/04/2026 12:47:36] Adicionados 44 novos registros. Total no arquivo: 240.
+[05/04/2026 12:47:38] Aguardando 30 segundos...
+[05/04/2026 12:48:08] --- Ciclo 2 ---
+[05/04/2026 12:48:19] Capturados 50 registros da pagina.
+[05/04/2026 12:48:19] Arquivo salvo com 242 registros.
+[05/04/2026 12:48:19] Adicionados 2 novos registros. Total no arquivo: 242.
+[05/04/2026 12:48:20] Aguardando 30 segundos...
+[05/04/2026 12:48:50] --- Ciclo 3 ---
+[05/04/2026 12:49:00] Capturados 50 registros da pagina.
+[05/04/2026 12:49:00] Arquivo salvo com 243 registros.
+[05/04/2026 12:49:00] Adicionados 1 novos registros. Total no arquivo: 243.
+[05/04/2026 12:49:01] Aguardando 30 segundos...
+[05/04/2026 12:49:31] --- Ciclo 4 ---
+[05/04/2026 12:49:42] Capturados 50 registros da pagina.
+[05/04/2026 12:49:42] Arquivo salvo com 245 registros.
+[05/04/2026 12:49:42] Adicionados 2 novos registros. Total no arquivo: 245.
+[05/04/2026 12:49:42] Aguardando 30 segundos...
+[05/04/2026 12:50:12] --- Ciclo 5 ---
+[05/04/2026 12:50:21] Capturados 50 registros da pagina.
+[05/04/2026 12:50:21] Arquivo salvo com 247 registros.
+[05/04/2026 12:50:21] Adicionados 2 novos registros. Total no arquivo: 247.
+[05/04/2026 12:50:22] Aguardando 30 segundos...
+[05/04/2026 12:50:52] --- Ciclo 6 ---
+[05/04/2026 12:51:02] Capturados 50 registros da pagina.
+[05/04/2026 12:51:02] Arquivo salvo com 248 registros.
+[05/04/2026 12:51:02] Adicionados 1 novos registros. Total no arquivo: 248.
+[05/04/2026 12:51:03] Aguardando 30 segundos...
+[05/04/2026 12:51:33] --- Ciclo 7 ---
+[05/04/2026 12:51:42] Capturados 50 registros da pagina.
+[05/04/2026 12:51:42] Arquivo salvo com 248 registros.
+[05/04/2026 12:51:42] Adicionados 0 novos registros. Total no arquivo: 248.
+[05/04/2026 12:51:43] Aguardando 30 segundos...
+[05/04/2026 12:52:13] --- Ciclo 8 ---
+[05/04/2026 12:52:21] Capturados 50 registros da pagina.
+[05/04/2026 12:52:21] Arquivo salvo com 249 registros.
+[05/04/2026 12:52:22] Adicionados 1 novos registros. Total no arquivo: 249.
+[05/04/2026 12:52:22] Aguardando 30 segundos...
+[05/04/2026 12:52:52] --- Ciclo 9 ---
+[05/04/2026 12:53:02] Capturados 50 registros da pagina.
+[05/04/2026 12:53:02] Arquivo salvo com 250 registros.
+[05/04/2026 12:53:02] Adicionados 1 novos registros. Total no arquivo: 250.
+[05/04/2026 12:53:03] Aguardando 30 segundos...
+[05/04/2026 12:53:33] --- Ciclo 10 ---
+[05/04/2026 12:53:42] Capturados 50 registros da pagina.
+[05/04/2026 12:53:42] Arquivo salvo com 251 registros.
+[05/04/2026 12:53:42] Adicionados 1 novos registros. Total no arquivo: 251.
+[05/04/2026 12:53:43] Aguardando 30 segundos...
+[05/04/2026 12:53:56] Servico encerrado pelo usuario.
+[05/04/2026 12:56:23] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 12:56:27] Abrindo pagina de login...
+[05/04/2026 12:56:43] Login realizado com sucesso.
+[05/04/2026 12:56:43] Login realizado com sucesso.
+[05/04/2026 12:56:44] --- Ciclo 1 ---
+[05/04/2026 12:56:55] Capturados 50 registros da pagina.
+[05/04/2026 12:56:55] Arquivo salvo com 260 registros.
+[05/04/2026 12:56:55] Adicionados 9 novos registros. Total no arquivo: 260.
+[05/04/2026 12:56:57] Aguardando 30 segundos...
+[05/04/2026 13:06:56] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 13:07:02] Abrindo pagina de login...
+[05/04/2026 13:07:41] ERRO no login tentativa 1: Message: 
+Stacktrace:
+	chromedriver!GetHandleVerifier [0xfbcdf3+10b03]
+	chromedriver!GetHandleVerifier [0xfbcf24+10c34]
+	chromedriver!(No symbol) [0xda2120]
+	chromedriver!(No symbol) [0xdeabca]
+	chromedriver!(No symbol) [0xdeae6b]
+	chromedriver!(No symbol) [0xe2d0b2]
+	chromedriver!(No symbol) [0xe0db54]
+	chromedriver!(No symbol) [0xe2a9a5]
+	chromedriver!(No symbol) [0xe0d8a6]
+	chromedriver!(No symbol) [0xde0229]
+	chromedriver!(No symbol) [0xde0fe4]
+	chromedriver!GetHandleVerifier [0x12248b9+2785c9]
+	chromedriver!GetHandleVerifier [0x121feb5+273bc5]
+	chromedriver!GetHandleVerifier [0x123e06b+291d7b]
+	chromedriver!GetHandleVerifier [0xfd5cc8+299d8]
+	chromedriver!GetHandleVerifier [0xfdd9fd+3170d]
+	chromedriver!GetHandleVerifier [0xfc58c8+195d8]
+	chromedriver!GetHandleVerifier [0xfc5a92+197a2]
+	chromedriver!GetHandleVerifier [0xfaee9a+2baa]
+	KERNEL32!BaseThreadInitThunk [0x768e7ba9+19]
+	ntdll!RtlInitializeExceptionChain [0x774ec3ab+6b]
+	ntdll!RtlClearBits [0x774ec32f+bf]
+
+[05/04/2026 13:07:41] Falha no login, tentando captura sem login.
+[05/04/2026 13:07:41] Proceeding without login.
+[05/04/2026 13:07:42] --- Ciclo 1 ---
+[05/04/2026 13:07:51] Capturados 50 registros da pagina.
+[05/04/2026 13:07:51] Arquivo salvo com 286 registros.
+[05/04/2026 13:07:51] Adicionados 26 novos registros. Total no arquivo: 286.
+[05/04/2026 13:07:52] Aguardando 30 segundos...
+[05/04/2026 13:08:22] --- Ciclo 2 ---
+[05/04/2026 13:08:31] Capturados 50 registros da pagina.
+[05/04/2026 13:08:31] Arquivo salvo com 288 registros.
+[05/04/2026 13:08:31] Adicionados 2 novos registros. Total no arquivo: 288.
+[05/04/2026 13:08:31] Aguardando 30 segundos...
+[05/04/2026 13:09:01] --- Ciclo 3 ---
+[05/04/2026 13:09:10] Capturados 50 registros da pagina.
+[05/04/2026 13:09:10] Arquivo salvo com 290 registros.
+[05/04/2026 13:09:10] Adicionados 2 novos registros. Total no arquivo: 290.
+[05/04/2026 13:09:11] Aguardando 30 segundos...
+[05/04/2026 13:09:41] --- Ciclo 4 ---
+[05/04/2026 13:09:51] Capturados 50 registros da pagina.
+[05/04/2026 13:09:51] Arquivo salvo com 292 registros.
+[05/04/2026 13:09:51] Adicionados 2 novos registros. Total no arquivo: 292.
+[05/04/2026 13:09:52] Aguardando 30 segundos...
+[05/04/2026 13:10:22] --- Ciclo 5 ---
+[05/04/2026 13:10:32] Capturados 50 registros da pagina.
+[05/04/2026 13:10:32] Arquivo salvo com 293 registros.
+[05/04/2026 13:10:32] Adicionados 1 novos registros. Total no arquivo: 293.
+[05/04/2026 13:10:33] Aguardando 30 segundos...
