@@ -1,0 +1,31 @@
+[05/04/2026 11:33:32] --- Ciclo 2 ---
+[05/04/2026 11:33:33] Aguardando 30 segundos...
+[05/04/2026 11:34:03] --- Ciclo 3 ---
+[05/04/2026 11:34:04] Aguardando 30 segundos...
+[05/04/2026 11:34:34] --- Ciclo 4 ---
+[05/04/2026 11:34:46] Capturados 50 registros da pagina.
+[05/04/2026 11:34:46] Arquivo salvo com 56 registros.
+[05/04/2026 11:34:46] Adicionados 6 novos registros. Total no arquivo: 56.
+[05/04/2026 11:34:47] Aguardando 30 segundos...
+[05/04/2026 11:35:17] --- Ciclo 5 ---
+[05/04/2026 11:35:18] Aguardando 30 segundos...
+[05/04/2026 11:44:32] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 11:47:32] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 11:51:52] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 11:56:29] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 11:57:10] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 11:58:34] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 11:59:21] === AviatorService iniciado - continuando captura em arquivo existente ===
+[05/04/2026 11:59:24] Abrindo pagina de login...
+[05/04/2026 11:59:38] Login realizado com sucesso.
+[05/04/2026 11:59:38] Login realizado com sucesso.
+[05/04/2026 11:59:39] --- Ciclo 1 ---
+[05/04/2026 11:59:50] Capturados 50 registros da pagina.
+[05/04/2026 11:59:50] Arquivo salvo com 106 registros.
+[05/04/2026 11:59:50] Adicionados 50 novos registros. Total no arquivo: 106.
+[05/04/2026 11:59:51] Aguardando 30 segundos...
+[05/04/2026 12:00:21] --- Ciclo 2 ---
+[05/04/2026 12:00:21] Aguardando 30 segundos...
+[05/04/2026 12:00:51] --- Ciclo 3 ---
+[05/04/2026 12:00:52] Aguardando 30 segundos...
+[05/04/2026 12:01:17] Servico encerrado pelo usuario.
