@@ -1,11 +1,4 @@
 # -*- coding: utf-8 -*-
-# =============================================================================
-#  AviatorService.py  —  versão aprimorada com ML adaptativo
-#  Melhorias: feature engineering rica, validação temporal, limpeza de outliers,
-#  seleção automática de modelo por volume de dados, log de acurácia contínuo.
-#  Dashboard e visualizações INALTERADOS.
-# =============================================================================
-
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -15,22 +8,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from datetime import date, datetime, timedelta
 import time
 import os
-import json
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.linear_model import Ridge
-from sklearn.model_selection import TimeSeriesSplit, cross_val_score
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
 import joblib
 from flask import Flask, render_template_string
 import threading
 from webdriver_manager.chrome import ChromeDriverManager
-
-# ---------------------------------------------------------------------------
-# URLs e credenciais
-# ---------------------------------------------------------------------------
 
 LOGIN_URL = "https://www.tipminer.com/br/historico/estrelabet/aviator"
 URL_50 = (
@@ -41,60 +25,32 @@ URL_50 = (
 EMAIL = "marcossa73.ms@gmail.com"
 SENHA = "Mrcs3@46"
 
-# ---------------------------------------------------------------------------
-# Caminhos de arquivo
-# ---------------------------------------------------------------------------
-
-BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_FILE      = os.path.join(BASE_DIR, "resultados_aviator.txt")
-LOG_FILE         = os.path.join(BASE_DIR, "log_execucao.txt")
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_FILE = os.path.join(BASE_DIR, "resultados_aviator.txt")
+LOG_FILE    = os.path.join(BASE_DIR, "log_execucao.txt")
 PREDICTIONS_FILE = os.path.join(BASE_DIR, "predictions.txt")
-ACCURACY_LOG     = os.path.join(BASE_DIR, "accuracy_log.json")
-
-# Modelos de tempo (gap em segundos)
-MODEL_FILE_5  = os.path.join(BASE_DIR, "gap_model_5.pkl")
+MODEL_FILE_5 = os.path.join(BASE_DIR, "gap_model_5.pkl")
 MODEL_FILE_10 = os.path.join(BASE_DIR, "gap_model_10.pkl")
 MODEL_FILE_50 = os.path.join(BASE_DIR, "gap_model_50.pkl")
 
-# Modelos de ocorrências (gap em rodadas)
-MODEL_FILE_OC_5  = os.path.join(BASE_DIR, "gap_oc_model_5.pkl")
+MODEL_FILE_OC_5 = os.path.join(BASE_DIR, "gap_oc_model_5.pkl")
 MODEL_FILE_OC_10 = os.path.join(BASE_DIR, "gap_oc_model_10.pkl")
 MODEL_FILE_OC_50 = os.path.join(BASE_DIR, "gap_oc_model_50.pkl")
 
-# Scalers para normalização
-SCALER_FILE_5    = os.path.join(BASE_DIR, "scaler_5.pkl")
-SCALER_FILE_10   = os.path.join(BASE_DIR, "scaler_10.pkl")
-SCALER_FILE_50   = os.path.join(BASE_DIR, "scaler_50.pkl")
-SCALER_FILE_OC_5  = os.path.join(BASE_DIR, "scaler_oc_5.pkl")
-SCALER_FILE_OC_10 = os.path.join(BASE_DIR, "scaler_oc_10.pkl")
-SCALER_FILE_OC_50 = os.path.join(BASE_DIR, "scaler_oc_50.pkl")
-
-# ---------------------------------------------------------------------------
-# Constantes gerais
-# ---------------------------------------------------------------------------
-
 INTERVALO_SEGUNDOS = 30
-MAX_REGISTROS      = 10000
+MAX_REGISTROS = 10000
 
-THRESHOLD_5  = 5.0
+# Constantes para análise
+THRESHOLD_5 = 5.0
 THRESHOLD_10 = 10.0
 THRESHOLD_50 = 50.0
-WINDOW_SIZE  = 5
-PRE_WINDOW   = 4
+WINDOW_SIZE = 5
+PRE_WINDOW = 4
+
 
 # ---------------------------------------------------------------------------
-# Limiares adaptativos — o sistema escolhe o modelo conforme os dados crescem
-# ---------------------------------------------------------------------------
-
-MIN_GAPS_RIDGE        = 8    # regressão linear regularizada
-MIN_GAPS_RF           = 20   # Random Forest
-MIN_GAPS_GBM          = 50   # Gradient Boosting + CV temporal
-MIN_GAPS_FEATURES_EXT = 15   # features de rolling stats
-
-
-# ===========================================================================
 # Log
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def log(msg):
     agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -104,9 +60,9 @@ def log(msg):
         f.write(linha + "\n")
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # Driver
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def iniciar_driver():
     options = Options()
@@ -137,9 +93,9 @@ def clicar_js(driver, elemento):
     driver.execute_script("arguments[0].click();", elemento)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # Login
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def fazer_login(driver):
     log("Abrindo pagina de login...")
@@ -175,9 +131,9 @@ def fazer_login(driver):
     log("Login realizado com sucesso.")
 
 
-# ===========================================================================
-# Captura dos últimos 50 resultados
-# ===========================================================================
+# ---------------------------------------------------------------------------
+# Captura dos ultimos 50 resultados
+# ---------------------------------------------------------------------------
 
 def capturar_ultimos(driver):
     current_t = str(int(time.time() * 1000))
@@ -244,9 +200,9 @@ def capturar_ultimos(driver):
     return novos
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # Leitura e escrita do arquivo
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def carregar_existentes():
     if not os.path.exists(OUTPUT_FILE):
@@ -262,15 +218,17 @@ def carregar_existentes():
 
 
 def mesclar(existentes, novos):
+    # Chave de deduplicacao: valor + hora (ignora data para nao perder virada de dia)
     chaves = set((v, h) for v, h, d in existentes)
     adicionados = 0
     for registro in novos:
         chave = (registro[0], registro[1])
         if chave not in chaves:
-            existentes.insert(0, registro)
+            existentes.insert(0, registro)   # insere no inicio (mais recente)
             chaves.add(chave)
             adicionados += 1
 
+    # Reordena por hora decrescente (os novos ja vem antes, mas garante consistencia)
     existentes.sort(key=lambda r: r[1], reverse=True)
     return existentes, adicionados
 
@@ -283,9 +241,9 @@ def salvar_arquivo(registros):
     log(f"Arquivo salvo com {len(registros)} registros.")
 
 
-# ===========================================================================
-# Carga de dados para análise
-# ===========================================================================
+# ---------------------------------------------------------------------------
+# Funções de análise
+# ---------------------------------------------------------------------------
 
 def load_data_for_analysis():
     """Carrega dados do arquivo para analise"""
@@ -313,276 +271,6 @@ def load_data_for_analysis():
         df = df.sort_values("timestamp").reset_index(drop=True)
     return df
 
-
-# ===========================================================================
-# MÓDULO ML ADAPTATIVO
-# ===========================================================================
-
-# ---------------------------------------------------------------------------
-# 1. Limpeza de outliers
-# ---------------------------------------------------------------------------
-
-def clean_gaps(gaps: pd.Series) -> pd.Series:
-    """Remove outliers adaptativamente conforme o tamanho da amostra."""
-    if len(gaps) < 5:
-        return gaps
-
-    if len(gaps) < 20:
-        # IQR ampliado — menos agressivo com poucos dados
-        q1, q3 = gaps.quantile(0.25), gaps.quantile(0.75)
-        iqr = q3 - q1
-        lower, upper = q1 - 2.5 * iqr, q3 + 2.5 * iqr
-    else:
-        # z-score ±3σ para amostras maiores
-        mean, std = gaps.mean(), gaps.std()
-        lower, upper = mean - 3 * std, mean + 3 * std
-
-    cleaned = gaps[(gaps >= lower) & (gaps <= upper)]
-    removed = len(gaps) - len(cleaned)
-    if removed > 0:
-        log(f"  [LIMPEZA] {removed} outlier(s) removido(s) dos gaps.")
-    return cleaned if len(cleaned) >= 3 else gaps  # reverte se limpou demais
-
-
-# ---------------------------------------------------------------------------
-# 2. Feature engineering adaptativa
-# ---------------------------------------------------------------------------
-
-def build_features(gaps: pd.Series):
-    """
-    Gera matriz de features X e vetor alvo y.
-    A janela e os tipos de feature crescem com o volume de dados disponíveis.
-    Retorna (X, y).
-    """
-    n = len(gaps)
-
-    # Janela de lags dinâmica
-    if n < 10:
-        lag_window = 2
-    elif n < 20:
-        lag_window = 3
-    elif n < 40:
-        lag_window = 5
-    else:
-        lag_window = 8
-
-    X, y = [], []
-
-    for i in range(lag_window, n):
-        row = list(gaps.iloc[i - lag_window:i].values)  # lags brutos
-
-        # Features de rolling stats (com amostra suficiente)
-        if n >= MIN_GAPS_FEATURES_EXT:
-            window_vals = gaps.iloc[max(0, i - lag_window):i]
-            wm = window_vals.mean()
-            row += [
-                wm,                                                          # média da janela
-                window_vals.std() if len(window_vals) > 1 else 0.0,         # desvio padrão
-                window_vals.min(),                                           # mínimo
-                window_vals.max(),                                           # máximo
-                gaps.iloc[i - 1] / (wm + 1e-9),                            # ratio último/média
-                float((window_vals.diff().dropna() > 0).sum()),             # nº de altas
-                gaps.iloc[i - 1] - gaps.iloc[i - lag_window],               # delta da janela
-            ]
-
-        # Posição relativa na série (tendência temporal leve)
-        if n >= 30:
-            row.append(i / n)
-
-        X.append(row)
-        y.append(gaps.iloc[i])
-
-    return np.array(X), np.array(y)
-
-
-# ---------------------------------------------------------------------------
-# 3. Seleção automática de modelo por volume
-# ---------------------------------------------------------------------------
-
-def select_model(n_gaps: int):
-    """Retorna (model, model_name) adequados para o volume de dados disponível."""
-    if n_gaps >= MIN_GAPS_GBM:
-        return GradientBoostingRegressor(
-            n_estimators=300, max_depth=4,
-            learning_rate=0.05, subsample=0.8,
-            min_samples_leaf=3, random_state=42
-        ), "GradientBoosting"
-    elif n_gaps >= MIN_GAPS_RF:
-        return RandomForestRegressor(
-            n_estimators=200, max_depth=6,
-            min_samples_leaf=2, random_state=42
-        ), "RandomForest"
-    elif n_gaps >= MIN_GAPS_RIDGE:
-        return Ridge(alpha=1.0), "Ridge"
-    else:
-        return None, "Estatistico"
-
-
-# ---------------------------------------------------------------------------
-# 4. Log de acurácia
-# ---------------------------------------------------------------------------
-
-def load_accuracy_log() -> dict:
-    if os.path.exists(ACCURACY_LOG):
-        try:
-            with open(ACCURACY_LOG, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"5": [], "10": [], "50": [], "oc_5": [], "oc_10": [], "oc_50": []}
-
-
-def save_accuracy_log(acc_log: dict):
-    try:
-        with open(ACCURACY_LOG, "w", encoding="utf-8") as f:
-            json.dump(acc_log, f, indent=2)
-    except Exception as e:
-        log(f"  [WARN] Nao foi possivel salvar log de acuracia: {e}")
-
-
-# ---------------------------------------------------------------------------
-# 5. Treinamento com validação temporal — só salva se melhorar
-# ---------------------------------------------------------------------------
-
-def train_and_maybe_update(gaps: pd.Series, model_file: str,
-                            scaler_file: str, log_key: str) -> dict:
-    """
-    Treina, valida e substitui o modelo apenas se a acurácia melhorar.
-    Suporta amostras pequenas com degradação graciosa.
-    """
-    metrics = {'model_name': 'Estatistico', 'n_gaps': len(gaps),
-               'mae': None, 'rmse': None, 'cv_mae': None, 'cv_std': None}
-
-    n = len(gaps)
-    model, model_name = select_model(n)
-    metrics['model_name'] = model_name
-
-    if model is None:
-        return metrics
-
-    try:
-        X, y = build_features(gaps)
-        if len(X) < 6:
-            return metrics
-
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-
-        # Validação cruzada temporal (quando há dados suficientes)
-        if n >= MIN_GAPS_GBM and len(X) >= 15:
-            n_splits = min(5, len(X) // 5)
-            tscv = TimeSeriesSplit(n_splits=n_splits)
-            cv_scores = cross_val_score(
-                model, X_scaled, y,
-                cv=tscv, scoring='neg_mean_absolute_error'
-            )
-            metrics['cv_mae'] = float(-cv_scores.mean())
-            metrics['cv_std'] = float(cv_scores.std())
-            log(f"  [{log_key}] CV-MAE: {metrics['cv_mae']:.1f}s "
-                f"(±{metrics['cv_std']:.1f}s) | Modelo: {model_name}")
-        else:
-            log(f"  [{log_key}] Amostra limitada ({n} gaps) | Modelo: {model_name}")
-
-        # Hold-out temporal (80/20)
-        split = max(1, int(len(X) * 0.8))
-        X_tr, X_te = X_scaled[:split], X_scaled[split:]
-        y_tr, y_te = y[:split], y[split:]
-
-        model.fit(X_tr, y_tr)
-
-        new_mae = None
-        if len(X_te) > 0:
-            preds    = model.predict(X_te)
-            new_mae  = mean_absolute_error(y_te, preds)
-            new_rmse = np.sqrt(mean_squared_error(y_te, preds))
-            metrics['mae']  = float(new_mae)
-            metrics['rmse'] = float(new_rmse)
-            log(f"  [{log_key}] MAE={new_mae:.1f}s | RMSE={new_rmse:.1f}s")
-
-        # Compara com modelo anterior antes de salvar
-        should_save = True
-        if os.path.exists(model_file) and new_mae is not None:
-            try:
-                old_model  = joblib.load(model_file)
-                old_scaler = joblib.load(scaler_file) if os.path.exists(scaler_file) else scaler
-                X_te_old   = old_scaler.transform(X[split:])
-                old_preds  = old_model.predict(X_te_old)
-                old_mae    = mean_absolute_error(y_te, old_preds)
-                if old_mae <= new_mae:
-                    should_save = False
-                    log(f"  [{log_key}] Modelo anterior mantido "
-                        f"(MAE {old_mae:.1f}s vs {new_mae:.1f}s)")
-            except Exception:
-                pass  # modelo incompatível → substitui
-
-        if should_save:
-            model.fit(X_scaled, y)   # retreina com 100% antes de salvar
-            joblib.dump(model, model_file)
-            joblib.dump(scaler, scaler_file)
-            log(f"  [{log_key}] Modelo atualizado e salvo.")
-
-        # Persiste log de acurácia
-        acc_log = load_accuracy_log()
-        if log_key not in acc_log:
-            acc_log[log_key] = []
-        acc_log[log_key].append({
-            'ts': datetime.now().isoformat(),
-            'n_gaps': n, 'model': model_name,
-            'mae': metrics['mae'], 'rmse': metrics['rmse'],
-            'cv_mae': metrics['cv_mae']
-        })
-        acc_log[log_key] = acc_log[log_key][-200:]
-        save_accuracy_log(acc_log)
-
-    except Exception as e:
-        log(f"  [{log_key}] ERRO no treinamento: {e}")
-
-    return metrics
-
-
-# ---------------------------------------------------------------------------
-# 6. Predição robusta com fallback estatístico
-# ---------------------------------------------------------------------------
-
-def predict_next_gap(gaps: pd.Series, model_file: str,
-                      scaler_file: str, mean_gap: float) -> float:
-    """
-    Retorna o gap previsto em segundos (ou rodadas).
-    Fallback: média ponderada (recentes pesam mais) → média simples.
-    """
-    if os.path.exists(model_file) and len(gaps) >= MIN_GAPS_RIDGE:
-        try:
-            model  = joblib.load(model_file)
-            scaler = joblib.load(scaler_file) if os.path.exists(scaler_file) else None
-
-            X, _ = build_features(gaps)
-            if len(X) == 0:
-                raise ValueError("Features vazias")
-
-            last_x = X[-1].reshape(1, -1)
-            if scaler:
-                last_x = scaler.transform(last_x)
-
-            pred = float(model.predict(last_x)[0])
-            # Sanitização — rejeita predições negativas ou absurdas
-            pred = max(pred, 1.0)
-            pred = min(pred, mean_gap * 10)
-            return pred
-        except Exception as e:
-            log(f"  [WARN] Predicao ML falhou ({e}), usando fallback.")
-
-    # Fallback: média ponderada exponencial
-    if len(gaps) >= 3:
-        weights = np.linspace(0.5, 1.5, len(gaps))
-        return float(np.average(gaps.values, weights=weights))
-
-    return mean_gap
-
-
-# ===========================================================================
-# Funções de análise
-# ===========================================================================
-
 def analyze_spikes(df, threshold, label):
     """Analisa picos acima do threshold e calcula estimativas."""
     if df.empty:
@@ -594,79 +282,77 @@ def analyze_spikes(df, threshold, label):
         return None
 
     # Calcular intervalos entre picos
-    spikes = spikes.sort_values("timestamp").reset_index(drop=True)
-    spikes["gap_seconds"]     = spikes["timestamp"].diff().dt.total_seconds()
+    spikes["gap_seconds"] = spikes["timestamp"].diff().dt.total_seconds()
+    gaps = spikes["gap_seconds"].dropna()
+
     spikes["gap_occurrences"] = spikes.index.to_series().diff()
+    gaps_oc = spikes["gap_occurrences"].dropna()
 
-    raw_gaps    = spikes["gap_seconds"].dropna()
-    gaps_oc_raw = spikes["gap_occurrences"].dropna()
-
-    if raw_gaps.empty:
+    if gaps.empty:
         return None
 
-    # ── Limpeza de outliers ──────────────────────────────────────────────────
-    gaps    = clean_gaps(raw_gaps)
-    gaps_oc = clean_gaps(gaps_oc_raw)
-
-    # ── Estatísticas descritivas ─────────────────────────────────────────────
-    mean_gap   = gaps.mean()
-    median_gap = gaps.median()
-    std_gap    = gaps.std() if len(gaps) > 1 else 0.0
+    mean_gap = gaps.mean()
+    std_gap = gaps.std()
     if pd.isna(std_gap):
         std_gap = 0.0
+    median_gap = gaps.median()
 
-    # Percentis para janela de confiança mais robusta
-    p25 = gaps.quantile(0.25) if len(gaps) >= 4 else mean_gap - std_gap
-    p75 = gaps.quantile(0.75) if len(gaps) >= 4 else mean_gap + std_gap
-
-    # ── Seleção de arquivos por threshold ────────────────────────────────────
+    # Treinar modelo ML para prever o próximo gap de tempo e ocorrencias
     if threshold == THRESHOLD_5:
-        model_file, model_file_oc = MODEL_FILE_5,  MODEL_FILE_OC_5
-        scaler_file, scaler_oc    = SCALER_FILE_5, SCALER_FILE_OC_5
-        log_key, log_key_oc       = "5",  "oc_5"
+        model_file = MODEL_FILE_5
+        model_file_oc = MODEL_FILE_OC_5
     elif threshold == THRESHOLD_10:
-        model_file, model_file_oc = MODEL_FILE_10, MODEL_FILE_OC_10
-        scaler_file, scaler_oc    = SCALER_FILE_10, SCALER_FILE_OC_10
-        log_key, log_key_oc       = "10", "oc_10"
+        model_file = MODEL_FILE_10
+        model_file_oc = MODEL_FILE_OC_10
     else:
-        model_file, model_file_oc = MODEL_FILE_50, MODEL_FILE_OC_50
-        scaler_file, scaler_oc    = SCALER_FILE_50, SCALER_FILE_OC_50
-        log_key, log_key_oc       = "50", "oc_50"
+        model_file = MODEL_FILE_50
+        model_file_oc = MODEL_FILE_OC_50
 
-    # ── Treinamento adaptativo — modelo de tempo ─────────────────────────────
-    train_and_maybe_update(gaps, model_file, scaler_file, f">{threshold} tempo")
+    if len(gaps) > 5:
+        # Time Model
+        X = []
+        y = []
+        for i in range(3, len(gaps)):
+            X.append(gaps.iloc[i-3:i].values)
+            y.append(gaps.iloc[i])
+        if X:
+            model = RandomForestRegressor(n_estimators=100, random_state=42)
+            model.fit(X, y)
+            joblib.dump(model, model_file)
 
-    # ── Treinamento adaptativo — modelo de ocorrências ───────────────────────
-    if len(gaps_oc) > 5:
-        train_and_maybe_update(gaps_oc, model_file_oc, scaler_oc,
-                               f">{threshold} rodadas")
+        # Ocurrences Model
+        X_oc = []
+        y_oc = []
+        for i in range(3, len(gaps_oc)):
+            X_oc.append(gaps_oc.iloc[i-3:i].values)
+            y_oc.append(gaps_oc.iloc[i])
+        if X_oc:
+            model_oc = RandomForestRegressor(n_estimators=100, random_state=42)
+            model_oc.fit(X_oc, y_oc)
+            joblib.dump(model_oc, model_file_oc)
 
-    # ── Predição de tempo ────────────────────────────────────────────────────
-    predicted_gap = predict_next_gap(gaps, model_file, scaler_file, mean_gap)
-
-    # ── Predição de ocorrências ──────────────────────────────────────────────
-    mean_oc = gaps_oc.mean() if not gaps_oc.empty else 0
-    predicted_gap_oc = predict_next_gap(gaps_oc, model_file_oc, scaler_oc, mean_oc) \
-        if not gaps_oc.empty else 0.0
-
-    # Rodadas desde o último pico (usa índice original do df)
-    original_spike_idx = df[df["value"] > threshold].index
-    current_oc = (len(df) - 1) - original_spike_idx[-1] if len(original_spike_idx) > 0 else 0
-
-    # ── Janela de confiança robusta ──────────────────────────────────────────
-    if len(gaps) >= 10:
-        half_low  = predicted_gap - (predicted_gap - p25) * 0.5
-        half_high = predicted_gap + (p75 - predicted_gap) * 0.5
+    # Prever o próximo gap usando ML ou estatística
+    if os.path.exists(model_file) and len(gaps) >= 3:
+        model = joblib.load(model_file)
+        features = gaps.iloc[-3:].values
+        predicted_gap = model.predict([features])[0]
     else:
-        half_low  = max(0, predicted_gap - 0.5 * std_gap)
-        half_high = predicted_gap + 0.5 * std_gap
+        predicted_gap = mean_gap
 
-    last_spike_time  = spikes["timestamp"].iloc[-1]
-    predicted_next   = last_spike_time + timedelta(seconds=predicted_gap)
-    predicted_early  = last_spike_time + timedelta(seconds=half_low)
-    predicted_late   = last_spike_time + timedelta(seconds=half_high)
+    if os.path.exists(model_file_oc) and len(gaps_oc) >= 3:
+        model_oc = joblib.load(model_file_oc)
+        features_oc = gaps_oc.iloc[-3:].values
+        predicted_gap_oc = model_oc.predict([features_oc])[0]
+    else:
+        predicted_gap_oc = gaps_oc.mean() if not gaps_oc.empty else 0
 
-    # ── Saída no terminal (formato idêntico ao original) ─────────────────────
+    current_oc = (len(df) - 1) - spikes.index[-1]
+
+    last_spike_time = spikes["timestamp"].iloc[-1]
+    predicted_next = last_spike_time + timedelta(seconds=predicted_gap)
+    predicted_early = last_spike_time + timedelta(seconds=max(0, predicted_gap - 0.5 * std_gap))
+    predicted_late = last_spike_time + timedelta(seconds=predicted_gap + 0.5 * std_gap)
+
     print(f"\n[ANALYSIS] {label} - Analise de Picos:")
     print(f"  Total de picos: {len(spikes)}")
     print(f"  Intervalo medio: {mean_gap/60:.2f} min (+/-{std_gap/60:.2f} min)")
@@ -678,10 +364,10 @@ def analyze_spikes(df, threshold, label):
     print(f"  Proximo pico estimado: {predicted_next.strftime('%d/%m/%Y %H:%M:%S')}")
     print(f"  Janela provavel: {predicted_early.strftime('%H:%M:%S')} -> {predicted_late.strftime('%H:%M:%S')}")
 
-    # ── Salva previsão ───────────────────────────────────────────────────────
+    # Salva a previsão
     save_prediction(threshold, predicted_next, predicted_early, predicted_late)
 
-    # ── Atualiza dashboard (chaves idênticas ao original) ────────────────────
+    # Update dashboard data
     if threshold == THRESHOLD_5:
         key = 'spikes_5'
     elif threshold == THRESHOLD_10:
@@ -690,54 +376,41 @@ def analyze_spikes(df, threshold, label):
         key = 'spikes_50'
 
     latest_analysis[key] = {
-        'total':            len(spikes),
-        'mean_gap':         mean_gap / 60,
-        'predicted_gap':    predicted_gap / 60,
+        'total': len(spikes),
+        'mean_gap': mean_gap / 60,
+        'predicted_gap': predicted_gap / 60,
         'predicted_gap_oc': predicted_gap_oc,
-        'current_oc':       current_oc,
-        'predicted_next':   predicted_next.strftime('%d/%m/%Y %H:%M:%S'),
-        'window':           f"{predicted_early.strftime('%H:%M:%S')} -> {predicted_late.strftime('%H:%M:%S')}"
+        'current_oc': current_oc,
+        'predicted_next': predicted_next.strftime('%d/%m/%Y %H:%M:%S'),
+        'window': f"{predicted_early.strftime('%H:%M:%S')} -> {predicted_late.strftime('%H:%M:%S')}"
     }
 
     return predicted_next
 
-
 def analyze_trends(df):
-    """Analisa tendencias usando rolling window com ajuste polinomial de grau 2."""
+    """Analisa tendencias usando rolling window"""
     if len(df) < WINDOW_SIZE:
         return
 
     df = df.copy()
     df["rolling_mean"] = df["value"].rolling(WINDOW_SIZE).mean()
-
-    # Slope linear (grau 1) — mantido para exibição
     df["rolling_slope"] = df["value"].rolling(WINDOW_SIZE).apply(
-        lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan,
-        raw=True
+        lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan, raw=True
     )
-
-    # Curvatura (grau 2) — melhora a projeção capturando aceleração
-    df["rolling_curv"] = df["value"].rolling(WINDOW_SIZE).apply(
-        lambda x: np.polyfit(range(len(x)), x, 2)[0] if len(x) == WINDOW_SIZE else np.nan,
-        raw=True
-    )
-
     df["projection"] = df["rolling_mean"] + df["rolling_slope"]
 
     if not df["rolling_slope"].isna().all():
-        last_mean  = df["rolling_mean"].iloc[-1]
+        last_mean = df["rolling_mean"].iloc[-1]
         last_slope = df["rolling_slope"].iloc[-1]
-        last_curv  = df["rolling_curv"].iloc[-1] if not df["rolling_curv"].isna().all() else 0.0
 
-        # Saída no terminal (formato idêntico ao original)
         print("\n[ANALYSIS] Tendencia Rolling Window (ultimas 5 amostras):")
         print(f"  Media: {last_mean:.2f}")
         print(f"  Inclinacao: {last_slope:.4f}")
 
+        # Proje??es para os próximos 4 resultados
         projections = []
         for i in range(1, 5):
-            # Projeção com componente quadrático (mais precisa que linear puro)
-            pred = last_mean + i * last_slope + (i ** 2) * last_curv * 0.5
+            pred = last_mean + i * last_slope
             projections.append(pred)
             print(f"  Projecao proxima {i}: {pred:.2f}")
             if pred > THRESHOLD_5:
@@ -747,17 +420,12 @@ def analyze_trends(df):
             if pred > THRESHOLD_50:
                 print(f"    ALERTA: Projecao {i} aponta para valor > 50!")
 
-        # Atualiza dashboard (chaves idênticas ao original)
+        # Update dashboard data
         latest_analysis['trends'] = {
-            'mean':  last_mean,
+            'mean': last_mean,
             'slope': last_slope,
-            'projections': [
-                {'value': p, 'alert_5': p > THRESHOLD_5,
-                 'alert_10': p > THRESHOLD_10, 'alert_50': p > THRESHOLD_50}
-                for p in projections
-            ]
+            'projections': [{'value': p, 'alert_5': p > THRESHOLD_5, 'alert_10': p > THRESHOLD_10, 'alert_50': p > THRESHOLD_50} for p in projections]
         }
-
 
 def analyze_signatures(df, threshold, label):
     """Analisa assinaturas pre-pico"""
@@ -783,10 +451,10 @@ def analyze_signatures(df, threshold, label):
 def save_prediction(threshold, predicted_next, predicted_early, predicted_late):
     """Saves a prediction to the predictions file."""
     with open(PREDICTIONS_FILE, "a", encoding="utf-8") as f:
-        ts_now    = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        next_str  = predicted_next.strftime("%d/%m/%Y %H:%M:%S")
+        ts_now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        next_str = predicted_next.strftime("%d/%m/%Y %H:%M:%S")
         early_str = predicted_early.strftime("%d/%m/%Y %H:%M:%S")
-        late_str  = predicted_late.strftime("%d/%m/%Y %H:%M:%S")
+        late_str = predicted_late.strftime("%d/%m/%Y %H:%M:%S")
         f.write(f"{ts_now};{threshold};{next_str};{early_str};{late_str};pendente\n")
 
 
@@ -805,14 +473,11 @@ def check_predictions(df):
             if len(parts) == 6:
                 ts_str, thresh_str, next_str, early_str, late_str, status = parts
                 thresh = float(thresh_str)
-                early  = datetime.strptime(early_str, "%d/%m/%Y %H:%M:%S")
-                late   = datetime.strptime(late_str,  "%d/%m/%Y %H:%M:%S")
+                early = datetime.strptime(early_str, "%d/%m/%Y %H:%M:%S")
+                late = datetime.strptime(late_str, "%d/%m/%Y %H:%M:%S")
                 if status == "pendente":
-                    spikes_in_window = df[
-                        (df["timestamp"] >= early) &
-                        (df["timestamp"] <= late) &
-                        (df["value"] > thresh)
-                    ]
+                    # Verifica se houve pico > thresh na janela
+                    spikes_in_window = df[(df["timestamp"] >= early) & (df["timestamp"] <= late) & (df["value"] > thresh)]
                     if not spikes_in_window.empty:
                         status = "acerto"
                     elif datetime.now() > late:
@@ -839,65 +504,70 @@ def run_analysis():
     # Update dashboard initial data
     latest_analysis['total_registros'] = len(df)
     latest_analysis['periodo'] = f"{df['timestamp'].min()} -> {df['timestamp'].max()}"
-    latest_analysis['ultimo']  = f"{df['timestamp'].max()} - Valor: {df['value'].iloc[-1]:.2f}"
+    latest_analysis['ultimo'] = f"{df['timestamp'].max()} - Valor: {df['value'].iloc[-1]:.2f}"
 
     last_50_df = df.tail(100)
 
     latest_analysis['counts_100'] = {
-        'c2':  len(last_50_df[last_50_df['value'] >= 2]),
-        'c5':  len(last_50_df[last_50_df['value'] >= 5]),
+        'c2': len(last_50_df[last_50_df['value'] >= 2]),
+        'c5': len(last_50_df[last_50_df['value'] >= 5]),
         'c10': len(last_50_df[last_50_df['value'] >= 10]),
         'c50': len(last_50_df[last_50_df['value'] >= 50])
     }
 
-    # Pre-calcula rolling para o gráfico
+    # Ensure trends are calculated before extracting data if available, though analyze_trends is called after, it's ok we can do rudimentary calculations here:
+    last_50_formatted = []
+
+    # Pre-calculate rolling for chart
     df_chart = df.copy()
-    df_chart["rolling_mean"]  = df_chart["value"].rolling(WINDOW_SIZE).mean()
+    df_chart["rolling_mean"] = df_chart["value"].rolling(WINDOW_SIZE).mean()
     df_chart["rolling_slope"] = df_chart["value"].rolling(WINDOW_SIZE).apply(
-        lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan,
-        raw=True
+        lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan, raw=True
     )
     df_chart["projection"] = df_chart["rolling_mean"] + df_chart["rolling_slope"]
     df_chart_sliced = df_chart.tail(100)
 
-    last_50_formatted = []
     for _, r in df_chart_sliced.iterrows():
         val = r['value']
-        color = '#6c757d'
+        color = '#6c757d' # < 2 (gray)
         if val >= 50:
-            color = '#007bff'
+            color = '#007bff' # >= 50 (blue)
         elif val >= 10:
-            color = '#e83e8c'
+            color = '#e83e8c' # >= 10 (pink)
         elif val >= 5:
-            color = '#28a745'
+            color = '#28a745' # >= 5 (green)
         elif val >= 2:
-            color = '#6f42c1'
+            color = '#6f42c1' # >= 2 (purple)
         last_50_formatted.append({
-            'value': val,
-            'time': r['timestamp'].strftime('%H:%M:%S'),
+            'value': val, 
+            'time': r['timestamp'].strftime('%H:%M:%S'), 
             'color': color,
             'rolling_mean': float(r['rolling_mean']) if not pd.isna(r['rolling_mean']) else None,
-            'projection':   float(r['projection'])   if not pd.isna(r['projection'])   else None
+            'projection': float(r['projection']) if not pd.isna(r['projection']) else None
         })
     latest_analysis['last_100'] = last_50_formatted
 
-    # Análise para cada threshold
-    analyze_spikes(df, THRESHOLD_5,  ">5")
-    analyze_spikes(df, THRESHOLD_10, ">10")
-    analyze_spikes(df, THRESHOLD_50, ">50")
+    # Analise para >5
+    pred_5 = analyze_spikes(df, THRESHOLD_5, ">5")
 
-    # Tendências
+    # Analise para >10
+    pred_10 = analyze_spikes(df, THRESHOLD_10, ">10")
+
+    # Analise para >50
+    pred_50 = analyze_spikes(df, THRESHOLD_50, ">50")
+
+    # Tendencias
     analyze_trends(df)
 
     # Assinaturas
-    analyze_signatures(df, THRESHOLD_5,  ">5")
+    analyze_signatures(df, THRESHOLD_5, ">5")
     analyze_signatures(df, THRESHOLD_10, ">10")
     analyze_signatures(df, THRESHOLD_50, ">50")
 
     # Verifica e atualiza previsões
     check_predictions(df)
 
-    # Exibe estatísticas de previsões
+    # Exibe estatísticas de previsões separadas por threshold
     if os.path.exists(PREDICTIONS_FILE):
         stats = {}
         with open(PREDICTIONS_FILE, "r", encoding="utf-8") as f:
@@ -914,21 +584,16 @@ def run_analysis():
                         stats[thresh]["erros"] += 1
                     elif status == "pendente":
                         stats[thresh]["pendentes"] += 1
-
         for thresh, counts in stats.items():
-            total              = counts["acertos"] + counts["erros"]
-            total_predictions  = total + counts["pendentes"]
+            total = counts["acertos"] + counts["erros"]
+            total_predictions = total + counts["pendentes"]
             if total > 0:
                 taxa_acerto = counts["acertos"] / total * 100
-                print(f"\n[ANALYSIS] Prediction Statistics for >{int(thresh)}: "
-                      f"Total predictions: {total_predictions}, "
-                      f"Hits: {counts['acertos']}, Misses: {counts['erros']}, "
-                      f"Hit Rate: {taxa_acerto:.1f}%, Pending: {counts['pendentes']}")
+                print(f"\n[ANALYSIS] Prediction Statistics for >{int(thresh)}: Total predictions: {total_predictions}, Hits: {counts['acertos']}, Misses: {counts['erros']}, Hit Rate: {taxa_acerto:.1f}%, Pending: {counts['pendentes']}")
             else:
-                print(f"\n[ANALYSIS] Prediction Statistics for >{int(thresh)}: "
-                      f"Total predictions: {total_predictions}, "
-                      f"No completed predictions, Pending: {counts['pendentes']}")
+                print(f"\n[ANALYSIS] Prediction Statistics for >{int(thresh)}: Total predictions: {total_predictions}, No completed predictions, Pending: {counts['pendentes']}")
 
+            # Update dashboard data
             if thresh == 5.0:
                 key = 'pred_5'
             elif thresh == 10.0:
@@ -937,17 +602,17 @@ def run_analysis():
                 key = 'pred_50'
 
             latest_predictions[key] = {
-                'total':   total_predictions,
-                'hits':    counts['acertos'],
-                'misses':  counts['erros'],
-                'rate':    taxa_acerto if total > 0 else 0,
+                'total': total_predictions,
+                'hits': counts['acertos'],
+                'misses': counts['erros'],
+                'rate': taxa_acerto if total > 0 else 0,
                 'pending': counts['pendentes']
             }
 
 
-# ===========================================================================
-# Loop principal do serviço
-# ===========================================================================
+# ---------------------------------------------------------------------------
+# Loop principal do servico
+# ---------------------------------------------------------------------------
 
 def main():
     if os.path.exists(OUTPUT_FILE):
@@ -957,11 +622,7 @@ def main():
     driver = iniciar_driver()
 
     # Start Flask dashboard in a thread
-    threading.Thread(
-        target=lambda: app.run(host='0.0.0.0', port=5000,
-                               debug=False, use_reloader=False),
-        daemon=True
-    ).start()
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)).start()
 
     # Tentar login com retry em caso de timeout
     login_sucesso = False
@@ -985,6 +646,7 @@ def main():
         log("Proceeding without login.")
 
     try:
+        # Análise inicial se arquivo já existe
         if os.path.exists(OUTPUT_FILE):
             run_analysis()
 
@@ -993,6 +655,7 @@ def main():
             ciclo += 1
             log("--- Ciclo " + str(ciclo) + " ---")
 
+            # Capturar dados a cada ciclo (30 segundos)
             try:
                 novos = capturar_ultimos(driver)
                 log("Capturados " + str(len(novos)) + " registros da pagina.")
@@ -1006,6 +669,7 @@ def main():
 
             except Exception as e:
                 log("ERRO no ciclo " + str(ciclo) + ": " + str(e))
+                # Se for timeout, reinicie o driver e faça login novamente
                 if "timeout" in str(e).lower():
                     log("Timeout detectado, reiniciando driver e fazendo login...")
                     driver.quit()
@@ -1015,11 +679,13 @@ def main():
                     except Exception as e2:
                         log("ERRO ao relogar apos timeout: " + str(e2))
                 else:
+                    # Tenta relogar se a sessao expirou
                     try:
                         fazer_login(driver)
                     except Exception as e2:
                         log("ERRO ao relogar: " + str(e2))
 
+            # Executar análise após a captura (30 segundos)
             run_analysis()
 
             log("Aguardando " + str(INTERVALO_SEGUNDOS) + " segundos...")
@@ -1031,13 +697,9 @@ def main():
         driver.quit()
 
 
-# ===========================================================================
-# Flask App (dashboard idêntico ao original)
-# ===========================================================================
-
 if __name__ == "__main__":
     app = Flask(__name__)
-    latest_analysis    = {'spikes_5': None, 'spikes_10': None, 'spikes_50': None, 'trends': None}
+    latest_analysis = {'spikes_5': None, 'spikes_10': None, 'spikes_50': None, 'trends': None}
     latest_predictions = {'pred_5': None, 'pred_10': None, 'pred_50': None}
 
     @app.route('/')
