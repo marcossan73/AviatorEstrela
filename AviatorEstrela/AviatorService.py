@@ -33,6 +33,10 @@ MODEL_FILE_5 = os.path.join(BASE_DIR, "gap_model_5.pkl")
 MODEL_FILE_10 = os.path.join(BASE_DIR, "gap_model_10.pkl")
 MODEL_FILE_50 = os.path.join(BASE_DIR, "gap_model_50.pkl")
 
+MODEL_FILE_OC_5 = os.path.join(BASE_DIR, "gap_oc_model_5.pkl")
+MODEL_FILE_OC_10 = os.path.join(BASE_DIR, "gap_oc_model_10.pkl")
+MODEL_FILE_OC_50 = os.path.join(BASE_DIR, "gap_oc_model_50.pkl")
+
 INTERVALO_SEGUNDOS = 30
 MAX_REGISTROS = 10000
 
@@ -281,6 +285,9 @@ def analyze_spikes(df, threshold, label):
     spikes["gap_seconds"] = spikes["timestamp"].diff().dt.total_seconds()
     gaps = spikes["gap_seconds"].dropna()
 
+    spikes["gap_occurrences"] = spikes.index.to_series().diff()
+    gaps_oc = spikes["gap_occurrences"].dropna()
+
     if gaps.empty:
         return None
 
@@ -290,15 +297,19 @@ def analyze_spikes(df, threshold, label):
         std_gap = 0.0
     median_gap = gaps.median()
 
-    # Treinar modelo ML para prever o próximo gap
+    # Treinar modelo ML para prever o próximo gap de tempo e ocorrencias
     if threshold == THRESHOLD_5:
         model_file = MODEL_FILE_5
+        model_file_oc = MODEL_FILE_OC_5
     elif threshold == THRESHOLD_10:
         model_file = MODEL_FILE_10
+        model_file_oc = MODEL_FILE_OC_10
     else:
         model_file = MODEL_FILE_50
+        model_file_oc = MODEL_FILE_OC_50
 
     if len(gaps) > 5:
+        # Time Model
         X = []
         y = []
         for i in range(3, len(gaps)):
@@ -309,6 +320,17 @@ def analyze_spikes(df, threshold, label):
             model.fit(X, y)
             joblib.dump(model, model_file)
 
+        # Ocurrences Model
+        X_oc = []
+        y_oc = []
+        for i in range(3, len(gaps_oc)):
+            X_oc.append(gaps_oc.iloc[i-3:i].values)
+            y_oc.append(gaps_oc.iloc[i])
+        if X_oc:
+            model_oc = RandomForestRegressor(n_estimators=100, random_state=42)
+            model_oc.fit(X_oc, y_oc)
+            joblib.dump(model_oc, model_file_oc)
+
     # Prever o próximo gap usando ML ou estatística
     if os.path.exists(model_file) and len(gaps) >= 3:
         model = joblib.load(model_file)
@@ -316,6 +338,15 @@ def analyze_spikes(df, threshold, label):
         predicted_gap = model.predict([features])[0]
     else:
         predicted_gap = mean_gap
+
+    if os.path.exists(model_file_oc) and len(gaps_oc) >= 3:
+        model_oc = joblib.load(model_file_oc)
+        features_oc = gaps_oc.iloc[-3:].values
+        predicted_gap_oc = model_oc.predict([features_oc])[0]
+    else:
+        predicted_gap_oc = gaps_oc.mean() if not gaps_oc.empty else 0
+
+    current_oc = (len(df) - 1) - spikes.index[-1]
 
     last_spike_time = spikes["timestamp"].iloc[-1]
     predicted_next = last_spike_time + timedelta(seconds=predicted_gap)
@@ -326,7 +357,9 @@ def analyze_spikes(df, threshold, label):
     print(f"  Total de picos: {len(spikes)}")
     print(f"  Intervalo medio: {mean_gap/60:.2f} min (+/-{std_gap/60:.2f} min)")
     print(f"  Mediana dos intervalos: {median_gap/60:.2f} min")
-    print(f"  Proximo gap previsto (ML): {predicted_gap/60:.2f} min")
+    print(f"  Proximo gap previsto (ML Tempo): {predicted_gap/60:.2f} min")
+    print(f"  Proximo gap previsto (ML Rodadas): {predicted_gap_oc:.1f}")
+    print(f"  Rodadas desde o ultimo: {current_oc}")
     print(f"  Ultimo pico: {last_spike_time.strftime('%d/%m/%Y %H:%M:%S')}")
     print(f"  Proximo pico estimado: {predicted_next.strftime('%d/%m/%Y %H:%M:%S')}")
     print(f"  Janela provavel: {predicted_early.strftime('%H:%M:%S')} -> {predicted_late.strftime('%H:%M:%S')}")
@@ -346,6 +379,8 @@ def analyze_spikes(df, threshold, label):
         'total': len(spikes),
         'mean_gap': mean_gap / 60,
         'predicted_gap': predicted_gap / 60,
+        'predicted_gap_oc': predicted_gap_oc,
+        'current_oc': current_oc,
         'predicted_next': predicted_next.strftime('%d/%m/%Y %H:%M:%S'),
         'window': f"{predicted_early.strftime('%H:%M:%S')} -> {predicted_late.strftime('%H:%M:%S')}"
     }
@@ -472,6 +507,14 @@ def run_analysis():
     latest_analysis['ultimo'] = f"{df['timestamp'].max()} - Valor: {df['value'].iloc[-1]:.2f}"
 
     last_50_df = df.tail(100)
+
+    latest_analysis['counts_100'] = {
+        'c2': len(last_50_df[last_50_df['value'] >= 2]),
+        'c5': len(last_50_df[last_50_df['value'] >= 5]),
+        'c10': len(last_50_df[last_50_df['value'] >= 10]),
+        'c50': len(last_50_df[last_50_df['value'] >= 50])
+    }
+
     # Ensure trends are calculated before extracting data if available, though analyze_trends is called after, it's ok we can do rudimentary calculations here:
     last_50_formatted = []
 
@@ -488,11 +531,13 @@ def run_analysis():
         val = r['value']
         color = '#6c757d' # < 2 (gray)
         if val >= 50:
-            color = '#6f42c1' # >= 50 (purple)
+            color = '#007bff' # >= 50 (blue)
+        elif val >= 10:
+            color = '#e83e8c' # >= 10 (pink)
         elif val >= 5:
-            color = '#e83e8c' # >= 5 (pink)
+            color = '#28a745' # >= 5 (green)
         elif val >= 2:
-            color = '#28a745' # >= 2 (green)
+            color = '#6f42c1' # >= 2 (purple)
         last_50_formatted.append({
             'value': val, 
             'time': r['timestamp'].strftime('%H:%M:%S'), 
@@ -702,15 +747,24 @@ if __name__ == "__main__":
 
                     <div class="card">
                         <h3>Geral</h3>
-                        <div class="kpi" style="margin-bottom:10px;">
-                            <h4>Total Registros</h4>
-                            <p class="kpi-value">{{ total_registros }}</p>
+                        <div style="display:flex; gap:10px;">
+                            <div class="kpi" style="flex:1; margin-bottom:10px; padding: 10px;">
+                                <h4>Total Registros</h4>
+                                <p class="kpi-value" style="font-size: 20px;">{{ total_registros }}</p>
+                            </div>
+                            <div class="kpi" style="flex:1; margin-bottom:10px; padding: 10px;">
+                                <h4>Último Valor</h4>
+                                <p class="kpi-value" style="color:#333; font-size: 20px;">{{ ultimo.split(' - ')[1] if ultimo else 'N/A' }}</p>
+                            </div>
                         </div>
-                        <div class="kpi" style="margin-bottom:10px;">
-                            <h4>Último Valor</h4>
-                            <p class="kpi-value" style="color:#333">{{ ultimo.split(' - ')[1] if ultimo else 'N/A' }}</p>
+                        <div style="font-size:13px; margin-top:5px; border-top:1px solid #eee; padding-top:10px; text-align: center;">
+                            <strong>Nas últimas 100 rodadas:</strong><br>
+                            <span style="color:#6f42c1;font-weight:bold;">>2:</span> {{ counts_100.c2 if counts_100 else 0 }} | 
+                            <span style="color:#28a745;font-weight:bold;">>5:</span> {{ counts_100.c5 if counts_100 else 0 }} | 
+                            <span style="color:#e83e8c;font-weight:bold;">>10:</span> {{ counts_100.c10 if counts_100 else 0 }} | 
+                            <span style="color:#007bff;font-weight:bold;">>50:</span> {{ counts_100.c50 if counts_100 else 0 }}
                         </div>
-                        <p style="font-size:12px;text-align:center;color:#666;">Período: {{ periodo }}</p>
+                        <p style="font-size:12px;text-align:center;color:#666;margin-top:10px;">Período: {{ periodo }}</p>
                     </div>
 
                     <div class="card">
@@ -757,7 +811,9 @@ if __name__ == "__main__":
                             <h3>Spikes > 5</h3>
                             <p><strong>Total Picos:</strong> {{ spikes_5.total if spikes_5 else 'N/A' }}</p>
                             <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_5.mean_gap) if spikes_5 else 'N/A' }} min</p>
-                            <p><strong>Previsão ML:</strong> {{ "%.2f"|format(spikes_5.predicted_gap) if spikes_5 else 'N/A' }} min</p>
+                            <p><strong>Previsão Tempo ML:</strong> {{ "%.2f"|format(spikes_5.predicted_gap) if spikes_5 else 'N/A' }} min</p>
+                            <p><strong>Previsão (Rodadas):</strong> {{ "%.1f"|format(spikes_5.predicted_gap_oc) if spikes_5 else 'N/A' }}</p>
+                            <p><strong>Desde Último Pico:</strong> {{ spikes_5.current_oc if spikes_5 else 'N/A' }} rodadas</p>
                             <p><strong>Próximo Pico:</strong> <span style="color:#e83e8c;font-weight:bold;">{{ spikes_5.predicted_next if spikes_5 else 'N/A' }}</span></p>
                             <p><strong>Janela:</strong> {{ spikes_5.window if spikes_5 else 'N/A' }}</p>
                             <br>
@@ -767,7 +823,9 @@ if __name__ == "__main__":
                             <h3>Spikes > 10</h3>
                             <p><strong>Total Picos:</strong> {{ spikes_10.total if spikes_10 else 'N/A' }}</p>
                             <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_10.mean_gap) if spikes_10 else 'N/A' }} min</p>
-                            <p><strong>Previsão ML:</strong> {{ "%.2f"|format(spikes_10.predicted_gap) if spikes_10 else 'N/A' }} min</p>
+                            <p><strong>Previsão Tempo ML:</strong> {{ "%.2f"|format(spikes_10.predicted_gap) if spikes_10 else 'N/A' }} min</p>
+                            <p><strong>Previsão (Rodadas):</strong> {{ "%.1f"|format(spikes_10.predicted_gap_oc) if spikes_10 else 'N/A' }}</p>
+                            <p><strong>Desde Último Pico:</strong> {{ spikes_10.current_oc if spikes_10 else 'N/A' }} rodadas</p>
                             <p><strong>Próximo Pico:</strong> <span style="color:#007bff;font-weight:bold;">{{ spikes_10.predicted_next if spikes_10 else 'N/A' }}</span></p>
                             <p><strong>Janela:</strong> {{ spikes_10.window if spikes_10 else 'N/A' }}</p>
                             <br>
@@ -777,7 +835,9 @@ if __name__ == "__main__":
                             <h3>Spikes > 50</h3>
                             <p><strong>Total Picos:</strong> {{ spikes_50.total if spikes_50 else 'N/A' }}</p>
                             <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_50.mean_gap) if spikes_50 else 'N/A' }} min</p>
-                            <p><strong>Previsão ML:</strong> {{ "%.2f"|format(spikes_50.predicted_gap) if spikes_50 else 'N/A' }} min</p>
+                            <p><strong>Previsão Tempo ML:</strong> {{ "%.2f"|format(spikes_50.predicted_gap) if spikes_50 else 'N/A' }} min</p>
+                            <p><strong>Previsão (Rodadas):</strong> {{ "%.1f"|format(spikes_50.predicted_gap_oc) if spikes_50 else 'N/A' }}</p>
+                            <p><strong>Desde Último Pico:</strong> {{ spikes_50.current_oc if spikes_50 else 'N/A' }} rodadas</p>
                             <p><strong>Próximo Pico:</strong> <span id="next-spike-50" style="color:#6f42c1;font-weight:bold;">{{ spikes_50.predicted_next if spikes_50 else 'N/A' }}</span></p>
                             <p><strong>Janela:</strong> {{ spikes_50.window if spikes_50 else 'N/A' }}</p>
                             <br>
