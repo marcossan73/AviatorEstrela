@@ -46,7 +46,7 @@ ACCURACY_LOG     = os.path.join(BASE_DIR, "accuracy_log.json")
 
 THRESHOLD_5, THRESHOLD_10, THRESHOLD_50 = 5.0, 10.0, 50.0
 WINDOW_SIZE = 5
-INTERVALO_SEGUNDOS = 20
+INTERVALO_SEGUNDOS = 10
 MAX_REGISTROS = 10000
 
 # ---------------------------------------------------------------------------
@@ -120,51 +120,52 @@ def capturar_ultimos(driver):
     try:
         driver.get(f"{LOGIN_URL}?t={int(time.time()*1000)}&limit=50&subject=filter&isLoadMore=true")
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".cell__result")))
-        elements = driver.find_elements(By.CSS_SELECTOR, ".cell__result")
-        
+
         now = datetime.now()
         hoje_str = now.strftime("%d/%m/%Y")
         ontem_str = (now - timedelta(days=1)).strftime("%d/%m/%Y")
         novos = []
-        
-        for el in elements:
+
+        # Batch extraction via JavaScript para desempenho ultra-rápido (Sem gargalo IPC Selenium)
+        script_extracao = """
+        let resultados = [];
+        document.querySelectorAll('.cell__result').forEach(el => {
+            let val = el.innerText.replace('x','').replace('X','').replace(',', '.').trim();
+            let btn = el.closest('button');
+
+            if (!val && btn) {
+                let dataResult = btn.getAttribute('data-result');
+                if (dataResult) val = dataResult.replace('X', '').replace('x', '').replace(',', '.').trim();
+            }
+
+            let hora = '';
+            if (btn) {
+                let dateEl = btn.querySelector('.cell__date');
+                if (dateEl) hora = dateEl.innerText.trim();
+            }
+
+            if (val && hora) {
+                resultados.push({val: val.replace('.', ','), hora: hora});
+            }
+        });
+        return resultados;
+        """
+        extracted = driver.execute_script(script_extracao)
+
+        for item in extracted:
+            val = item.get("val")
+            hora = item.get("hora")
+
             try:
-                val = el.text.replace('x','').replace('X','').replace(',', '.').strip()
+                dt_tentativa = datetime.strptime(f"{hoje_str} {hora}", "%d/%m/%Y %H:%M:%S")
+                # Se o horário do chute no site for por exemplo 23:59 e agora for 00:01
+                # o dt_tentativa cai no 'hoje' as 23:59 (Quase 24h no futuro)
+                data_correta = ontem_str if dt_tentativa > now + timedelta(minutes=5) else hoje_str
+            except:
+                data_correta = hoje_str
 
-                btn = driver.execute_script("""
-                    var node = arguments[0];
-                    while (node && node.tagName !== 'BUTTON') {
-                        node = node.parentElement;
-                    }
-                    return node;
-                """, el)
+            novos.append((val, hora, data_correta))
 
-                if not val and btn:
-                    data_result = btn.get_attribute("data-result") or ""
-                    if data_result:
-                        val = data_result.replace("X", "").replace("x", "").replace(',', '.').strip()
-
-                hora = ""
-                if btn:
-                    try:
-                        el_hora = btn.find_element(By.CSS_SELECTOR, ".cell__date")
-                        hora = el_hora.text.strip()
-                    except Exception:
-                        pass
-
-                if val and hora: 
-                    try:
-                        dt_tentativa = datetime.strptime(f"{hoje_str} {hora}", "%d/%m/%Y %H:%M:%S")
-                        # Se o horário do chute no site for por exemplo 23:59 e agora for 00:01
-                        # o dt_tentativa cai no 'hoje' as 23:59 (Quase 24h no futuro)
-                        data_correta = ontem_str if dt_tentativa > now + timedelta(minutes=5) else hoje_str
-                    except:
-                        data_correta = hoje_str
-
-                    novos.append((val.replace('.', ','), hora, data_correta))
-            except Exception as ex: 
-                log(f"Erro linha de captura: {ex}")
-                continue
         return novos
     except Exception as e:
         log(f"Erro captura: {e}")
@@ -264,7 +265,19 @@ def analyze_spikes(df, threshold, label):
     # Subtraímos também 10% do gap provável como gordura garantida no inicio do balão
     safety_margin = pred_gap * 0.10
 
+    # ---------------------------------------------------------------------------------
+    # FIX: Evita o congelamento (Congelamento de estatística de >50 no passado)
+    # ---------------------------------------------------------------------------------
     last_spike = spikes["timestamp"].iloc[-1]
+    now_ts_roleta = df["timestamp"].iloc[-1] # Fuso atual correspondente real da roleta
+    time_since_last = (now_ts_roleta - last_spike).total_seconds()
+
+    # Se o tempo que JÁ passou for maior que a previsão, significa que o Pico está ATRASADO.
+    # Para não congelar a janela no passado, forçamos o ML a caminhar para frente usando o desvio padrão 
+    # atuando como um radar "Em tempo real" que se atualiza a cada varredura atrasada.
+    if time_since_last > pred_gap:
+        pred_gap = time_since_last + (std_adj * 0.5) # Atualiza a estimativa empiricamente pra frente
+
     predicted_next = last_spike + timedelta(seconds=pred_gap)
     early = predicted_next - timedelta(seconds=(std_adj + safety_margin))
     late = predicted_next + timedelta(seconds=(std_adj + safety_margin))
@@ -356,6 +369,34 @@ def analyze_spikes(df, threshold, label):
                 json.dump(saved_data, f)
         except: pass
 
+    # ============================================================
+    # Métrica de Assertividade Dinâmica
+    # ============================================================
+    hits = 0
+    evaluated = 0
+    for i in range(1, len(old_history)):
+        try:
+            # O momento real em que caiu a vela (avaliando a predição i, a resposta é a i-1)
+            real_spike_str = old_history[i-1]['spike_time']
+            start_str, end_str = old_history[i]['window'].split(' -> ')
+
+            # Converte em objetos tempo puro para matemática
+            rs_t = datetime.strptime(real_spike_str, "%H:%M:%S")
+            s_t = datetime.strptime(start_str, "%H:%M:%S")
+            e_t = datetime.strptime(end_str, "%H:%M:%S")
+
+            # Repara cruzamento de meia-noite (Virada 23:xx pra 00:xx)
+            if e_t < s_t:
+                e_t += timedelta(days=1)
+                if rs_t < s_t and rs_t.hour < 12: rs_t += timedelta(days=1)
+
+            if s_t <= rs_t <= e_t:
+                hits += 1
+            evaluated += 1
+        except: pass
+
+    accuracy_perc = f"{(hits / evaluated * 100):.0f}%" if evaluated > 0 else "N/A"
+
     latest_analysis[key] = {
         'total': len(spikes),
         'mean_gap': mean_gap / 60,
@@ -363,6 +404,7 @@ def analyze_spikes(df, threshold, label):
         'predicted_value': pred_value,
         'regime': regime_name,
         'confidence': f"{confidence*100:.0f}%",
+        'accuracy': accuracy_perc, # Porcentual novo
         'next': predicted_next.strftime('%H:%M:%S'),
         'window': f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}",
         'current_oc': len(df) - 1 - df[df["value"] > threshold].index[-1],
@@ -480,7 +522,7 @@ def dashboard():
     <html lang="pt-br">
     <head>
         <meta charset="UTF-8"><title>Aviator ML Intelligence</title>
-        <meta http-equiv="refresh" content="20">
+        <meta http-equiv="refresh" content="10">
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; margin: 0; }
@@ -585,6 +627,7 @@ def dashboard():
                         {% if k in data and data[k] %}
                             <div class="regime">Estado Local: {{ data[k].regime }}</div>
                             <p><strong>Confiança IA:</strong> <span class="{{ 'conf-high' if '8' in data[k].confidence or '9' in data[k].confidence else 'conf-low' }}">{{ data[k].confidence }}</span></p>
+                            <p><strong>Assertividade ML:</strong> <span style="font-weight:bold; color:#0056b3;">{{ data[k].accuracy }}</span></p>
                             <p><strong>Gap Médio:</strong> {{ "%.2f"|format(data[k].mean_gap) }} min</p>
                             <p><strong>Previsão ML (Tempo):</strong> {{ "%.2f"|format(data[k].predicted_gap) }} min</p>
                             <p><strong>Previsão ML (Valor):</strong> <span style="color:#28a745;font-weight:bold;">{{ "%.2f"|format(data[k].predicted_value) }}x</span></p>
@@ -702,7 +745,7 @@ def dashboard():
             function playAlertSound(times) {
                 if(!soundEnabled || times <= 0) return;
                 try {
-                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const ctx = new (window.AudioContext || window.webkit.AudioContext)();
                     const now = ctx.currentTime;
                     for (let i = 0; i < times; i++) {
                         const startTime = now + (i * 0.6); // 0.6s de intervalo entre cada loop
@@ -818,30 +861,36 @@ def main_loop():
                     with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
                         existentes = [l.strip() for l in f if l.strip()]
                 
-                # Criar set para evitar duplicados
-                current_keys = set(existentes)
+                # Criar chaves limitadas aos ultimos 100 para filtro anti-duplicação severo
+                # Vamos identificar como duplicado se o valor E a hora forem idênticos a algo recente
+                recentes = existentes[:100]
+                recentes_fingerprints = set([f"{r.split(';')[0]};{r.split(';')[1]}" for r in recentes if len(r.split(';')) >= 2])
+                
                 adicionados = 0
-                # novos vem com o mais recente no começo (0). Para manter a ordem correta
-                # de inserção no topo da lista "existentes", devemos inserir do mais antigo para o mais novo
                 for n in reversed(novos):
-                    line = f"{n[0]};{n[1]};{n[2]}"
-                    if line not in current_keys:
+                    fingerprint = f"{n[0]};{n[1]}"
+                    if fingerprint not in recentes_fingerprints:
+                        line = f"{n[0]};{n[1]};{n[2]}"
                         existentes.insert(0, line)
-                        current_keys.add(line)
+                        recentes_fingerprints.add(fingerprint)
                         adicionados += 1
-                with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-                    for item in existentes[:MAX_REGISTROS]:
-                        f.write(item + "\n")
-                
-                log(f"Adicionados: {adicionados}. Total: {len(existentes)}")
-                
-                # Executar Análise
-                df = load_data_for_analysis()
-                if not df.empty:
-                    analyze_spikes(df, THRESHOLD_5, ">5")
-                    analyze_spikes(df, THRESHOLD_10, ">10")
-                    analyze_spikes(df, THRESHOLD_50, ">50")
-                    analyze_trends(df)
+
+                # Otimização severa de ML: Só roda cálculos onerosos e reconstrução de base
+                # SE alguma informação inteiramente nova entrou no sistema!
+                if adicionados > 0:
+                    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+                        for item in existentes[:MAX_REGISTROS]:
+                            f.write(item + "\n")
+
+                    log(f"Adicionados: {adicionados}. Total: {len(existentes)}")
+
+                    # Executar Análise
+                    df = load_data_for_analysis()
+                    if not df.empty:
+                        analyze_spikes(df, THRESHOLD_5, ">5")
+                        analyze_spikes(df, THRESHOLD_10, ">10")
+                        analyze_spikes(df, THRESHOLD_50, ">50")
+                        analyze_trends(df)
 
             time.sleep(INTERVALO_SEGUNDOS)
     except KeyboardInterrupt:
