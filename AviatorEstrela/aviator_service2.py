@@ -121,8 +121,12 @@ def capturar_ultimos(driver):
         driver.get(f"{LOGIN_URL}?t={int(time.time()*1000)}&limit=50&subject=filter&isLoadMore=true")
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".cell__result")))
         elements = driver.find_elements(By.CSS_SELECTOR, ".cell__result")
-        hoje = date.today().strftime("%d/%m/%Y")
+        
+        now = datetime.now()
+        hoje_str = now.strftime("%d/%m/%Y")
+        ontem_str = (now - timedelta(days=1)).strftime("%d/%m/%Y")
         novos = []
+        
         for el in elements:
             try:
                 val = el.text.replace('x','').replace('X','').replace(',', '.').strip()
@@ -149,7 +153,15 @@ def capturar_ultimos(driver):
                         pass
 
                 if val and hora: 
-                    novos.append((val.replace('.', ','), hora, hoje))
+                    try:
+                        dt_tentativa = datetime.strptime(f"{hoje_str} {hora}", "%d/%m/%Y %H:%M:%S")
+                        # Se o horário do chute no site for por exemplo 23:59 e agora for 00:01
+                        # o dt_tentativa cai no 'hoje' as 23:59 (Quase 24h no futuro)
+                        data_correta = ontem_str if dt_tentativa > now + timedelta(minutes=5) else hoje_str
+                    except:
+                        data_correta = hoje_str
+
+                    novos.append((val.replace('.', ','), hora, data_correta))
             except Exception as ex: 
                 log(f"Erro linha de captura: {ex}")
                 continue
@@ -218,7 +230,17 @@ def analyze_spikes(df, threshold, label):
     spikes = df[df["value"] > threshold].copy()
     if len(spikes) < 3: return
 
-    spikes["gap_seconds"] = spikes["timestamp"].diff().dt.total_seconds()
+    # Para não contaminar o ML com Gaps irreais (ex: quando o bot fica desligado por horas),
+    # agrupamos as rodadas em "sessões" e só calculamos a diferença de tempo entre picos da MESMA sessão.
+    # Qualquer rodada da roleta com diferença > 15 minutos (900s) pra anterior indica que a captação esteve off.
+    df_temp = df.copy()
+    df_temp["session"] = (df_temp["timestamp"].diff().dt.total_seconds() > 900).cumsum()
+    
+    # Atualiza spikes com a sessão atribuída a cada rodada
+    spikes["session"] = df_temp.loc[spikes.index, "session"]
+    
+    # Agora o diff() só é calculado entre picos seguidos que ocorreram na mesma tacada de captação do robô
+    spikes["gap_seconds"] = spikes.groupby("session")["timestamp"].diff().dt.total_seconds()
     gaps = spikes["gap_seconds"].dropna()
 
     # Detecção de Regime (Cérebro do Sistema)
@@ -237,10 +259,15 @@ def analyze_spikes(df, threshold, label):
     # Se confiança baixa, a janela de erro aumenta para evitar falsas entradas
     std_adj = (gaps.std() if len(gaps) > 1 else mean_gap * 0.3) * (1.5 - confidence)
 
+    # Antecipações proativas reais - O ML traz o alvo provável,
+    # Mas precisamos de fato dar um lead time para o operador não ser pego de surpresa ("muito em cima da hora")
+    # Subtraímos também 10% do gap provável como gordura garantida no inicio do balão
+    safety_margin = pred_gap * 0.10
+
     last_spike = spikes["timestamp"].iloc[-1]
     predicted_next = last_spike + timedelta(seconds=pred_gap)
-    early = predicted_next - timedelta(seconds=std_adj)
-    late = predicted_next + timedelta(seconds=std_adj)
+    early = predicted_next - timedelta(seconds=(std_adj + safety_margin))
+    late = predicted_next + timedelta(seconds=(std_adj + safety_margin))
 
     key = f'spikes_{int(threshold)}'
 
@@ -408,16 +435,38 @@ def save_prediction(thresh, nxt, erl, lte):
 def load_data_for_analysis():
     if not os.path.exists(OUTPUT_FILE): return pd.DataFrame()
     data = []
+    
+    # Lendo o arquivo do mais novo pro mais antigo
     with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            p = line.strip().split(";")
-            if len(p) == 3:
-                try:
-                    val = float(p[0].replace(",", "."))
-                    ts = datetime.strptime(f"{p[2]} {p[1]}", "%d/%m/%Y %H:%M:%S")
-                    data.append({"value": val, "timestamp": ts})
-                except: continue
-    return pd.DataFrame(data).sort_values("timestamp").reset_index(drop=True)
+        linhas = [line.strip() for line in f if line.strip()]
+        
+    now = datetime.now()
+    
+    for line in linhas:
+        p = line.split(";")
+        if len(p) == 3:
+            try:
+                val = float(p[0].replace(",", "."))
+                ts = datetime.strptime(f"{p[2]} {p[1]}", "%d/%m/%Y %H:%M:%S")
+                
+                # Correção Dinâmica de Timestamp Retroativo:
+                # Se o horário gravado no arquivo de texto constar como sendo MAIOR (no Futuro) 
+                # do que a vida real presente (Ex: Script rodou as 00:01 e processou uma linha marcada ás 23:59 "hoje"),
+                # Devemos subtrair precisamente 1 dia desse registro para devolvê-lo ao "passado" correto de "Ontem".
+                if ts > now + timedelta(minutes=5):
+                    ts -= timedelta(days=1)
+                    
+                data.append({"value": val, "timestamp": ts})
+            except: continue
+                
+    if not data: return pd.DataFrame()
+    
+    # data está com os mais novos no topo
+    df = pd.DataFrame(data)
+    
+    # Ordena perfeitamente pela Data e Hora consertada do mais antigo (esquerda) pro mais presente (direita)
+    df = df.sort_values(by="timestamp", ascending=True).reset_index(drop=True)
+    return df
 
 # ---------------------------------------------------------------------------
 # Flask Dashboard (Modernizado e Unificado com o Original)
@@ -541,7 +590,7 @@ def dashboard():
                             <p><strong>Previsão ML (Valor):</strong> <span style="color:#28a745;font-weight:bold;">{{ "%.2f"|format(data[k].predicted_value) }}x</span></p>
                             <p><strong>Desde Último Pico:</strong> {{ data[k].current_oc }} rodadas</p>
                             <hr style="border:0.5px solid #eee; margin:10px 0;">
-                            <p><strong>Próximo Pico:</strong> <span class="next-spike" data-level="{{ k.split('_')[1] }}" id="next-spike-{{ k.split('_')[1] }}" style="color:#007bff;font-weight:bold;">{{ data[k].next }}</span></p>
+                            <p><strong>Próximo Pico:</strong> <span class="next-spike" data-level="{{ k.split('_')[1] }}" data-early="{{ data[k].window.split(' -> ')[0] }}" id="next-spike-{{ k.split('_')[1] }}" style="color:#007bff;font-weight:bold;">{{ data[k].next }}</span></p>
                             <p><strong>Janela:</strong> {{ data[k].window }}</p>
 
                             <details open>
@@ -697,17 +746,30 @@ def dashboard():
 
                 nextSpikes.forEach(span => {
                    let rawTime = span.innerText.trim();
-                   if (!rawTime || rawTime === 'N/A' || rawTime === '') return;
+                   let earlyTime = span.getAttribute('data-early');
+                   if (!rawTime || rawTime === 'N/A' || rawTime === '' || !earlyTime) return;
 
-                   // Check if time is within next 2 minutes to emit alert level
                    let parts = rawTime.split(':');
-                   if (parts.length === 3) {
+                   let eParts = earlyTime.split(':');
+                   if (parts.length === 3 && eParts.length === 3) {
                        let now = new Date();
+
                        let target = new Date();
                        target.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2], 10), 0);
-                       let diffMs = target - now;
-                       // If within next 1.5 min, valid alert!
-                       if (diffMs > 0 && diffMs < 90 * 1000) {
+
+                       let startWindow = new Date();
+                       startWindow.setHours(parseInt(eParts[0], 10), parseInt(eParts[1], 10), parseInt(eParts[2], 10), 0);
+
+                       // Fix target/window around midnight crossover
+                       if (target < now && (now - target) > 12 * 3600 * 1000) target.setDate(target.getDate() + 1);
+                       if (startWindow < now && (now - startWindow) > 12 * 3600 * 1000) startWindow.setDate(startWindow.getDate() + 1);
+
+                       let diffToStartMs = startWindow - now;
+                       let diffToTargetMs = target - now;
+
+                       // Alerta de Previsão Antecipada: Dispara se faltam menos de 2 Minutos para a JANELA ABRIR, 
+                       // ou se já estamos dentro do range entre [Abertura da Janela e O Alvo exato do meio]
+                       if ((diffToStartMs > 0 && diffToStartMs < 120 * 1000) || (diffToStartMs <= 0 && diffToTargetMs > 0)) {
                            let l = parseInt(span.getAttribute('data-level')) || 0;
                            if (l > maxLevel) maxLevel = l;
                        }
@@ -759,13 +821,14 @@ def main_loop():
                 # Criar set para evitar duplicados
                 current_keys = set(existentes)
                 adicionados = 0
-                for n in novos:
+                # novos vem com o mais recente no começo (0). Para manter a ordem correta
+                # de inserção no topo da lista "existentes", devemos inserir do mais antigo para o mais novo
+                for n in reversed(novos):
                     line = f"{n[0]};{n[1]};{n[2]}"
                     if line not in current_keys:
                         existentes.insert(0, line)
                         current_keys.add(line)
                         adicionados += 1
-                
                 with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
                     for item in existentes[:MAX_REGISTROS]:
                         f.write(item + "\n")
