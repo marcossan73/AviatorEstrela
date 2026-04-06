@@ -175,23 +175,39 @@ def build_features(gaps: pd.Series):
         y.append(gaps.iloc[i])
     return np.array(X), np.array(y)
 
-def predict_optimized(gaps, threshold_label):
-    if len(gaps) < 10: return gaps.mean()
-    
+def predict_optimized(data_series, threshold_label):
+    """
+    Treina o modelo usando o passado (X, y) 
+    E preve O FUTURO criando features a partir dos ultimos 'lag' observados.
+    """
+    if len(data_series) < 10: return data_series.mean()
+
     try:
-        X, y = build_features(gaps)
+        X, y = build_features(data_series)
         scaler = StandardScaler()
         X_s = scaler.fit_transform(X)
-        
+
         # Ensemble: Gradient Boosting para capturar não-linearidades
         model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
         model.fit(X_s, y)
-        
-        last_x = X[-1].reshape(1, -1)
-        pred = model.predict(scaler.transform(last_x))[0]
+
+        # ====== O SEGREDO DA PREVISÃO CLARIVIDENTE ======
+        # Para que o tempo previsto esteja de fato NO FUTURO (e não no pico que acabou de cair):
+        # Isolemos cirurgicamente as últimas n=lag instâncias para compor a matriz desconhecida (Próxima Rodada)
+        n = len(data_series)
+        lag = 5 if n > 15 else 3
+
+        future_window = data_series.iloc[-lag:]
+        feats = list(future_window.values)
+        feats.append(future_window.mean())
+        feats.append(future_window.std() if len(future_window) > 1 else 0)
+        feats.append(future_window.iloc[-1] / (future_window.mean() + 1e-6))
+
+        future_x = np.array(feats).reshape(1, -1)
+        pred = model.predict(scaler.transform(future_x))[0]
         return max(pred, 1.0)
     except:
-        return gaps.mean()
+        return data_series.mean()
 
 # ---------------------------------------------------------------------------
 # Análise de Dados e Dashboard
@@ -209,9 +225,13 @@ def analyze_spikes(df, threshold, label):
     detector = RegimeDetector()
     regime_name, confidence = detector.get_state(df)
 
-    # Predição ML
-    pred_gap = predict_optimized(gaps, label)
+    # Predição ML Temporal
+    pred_gap = predict_optimized(gaps, label + "_tempo")
     mean_gap = gaps.mean()
+
+    # Predição ML Valor Extra (Estratégia similar de ML para saídas prováveis em pico)
+    spike_values = spikes["value"]
+    pred_value = predict_optimized(spike_values, label + "_valor")
 
     # Ajuste de Janela Dinâmica baseado na Confiança
     # Se confiança baixa, a janela de erro aumenta para evitar falsas entradas
@@ -276,15 +296,50 @@ def analyze_spikes(df, threshold, label):
             })
         latest_analysis['last_100'] = last_100_formatted
 
+    old_history = latest_analysis.get(key, {}).get('history', [])
+
+    # Load persistence if empty memory
+    hist_file = os.path.join(BASE_DIR, "ml_history.json")
+    if not old_history and os.path.exists(hist_file):
+        try:
+            with open(hist_file, "r", encoding="utf-8") as f:
+                old_history = json.load(f).get(key, [])
+        except: pass
+
+    last_spike_str = last_spike.strftime('%H:%M:%S')
+
+    # Store the prediction in history, unique per last_spike (so it only updates when a new spike hits)
+    if not any(h['spike_time'] == last_spike_str for h in old_history):
+        old_history.insert(0, {
+            'prev_time': datetime.now().strftime('%H:%M:%S'),
+            'spike_time': last_spike_str,
+            'next': predicted_next.strftime('%H:%M:%S'),
+            'window': f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}",
+            'value': pred_value
+        })
+        old_history = old_history[:25] # Keep last 25 predictions
+        # Save persistence
+        try:
+            saved_data = {}
+            if os.path.exists(hist_file):
+                with open(hist_file, "r", encoding="utf-8") as f:
+                    saved_data = json.load(f)
+            saved_data[key] = old_history
+            with open(hist_file, "w", encoding="utf-8") as f:
+                json.dump(saved_data, f)
+        except: pass
+
     latest_analysis[key] = {
         'total': len(spikes),
         'mean_gap': mean_gap / 60,
         'predicted_gap': pred_gap / 60,
+        'predicted_value': pred_value,
         'regime': regime_name,
         'confidence': f"{confidence*100:.0f}%",
         'next': predicted_next.strftime('%H:%M:%S'),
         'window': f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}",
-        'current_oc': len(df) - 1 - df[df["value"] > threshold].index[-1]
+        'current_oc': len(df) - 1 - df[df["value"] > threshold].index[-1],
+        'history': old_history
     }
 
     log(f"Análise de {key} concluída e atualizada no dashboard!")
@@ -482,11 +537,38 @@ def dashboard():
                             <div class="regime">Estado Local: {{ data[k].regime }}</div>
                             <p><strong>Confiança IA:</strong> <span class="{{ 'conf-high' if '8' in data[k].confidence or '9' in data[k].confidence else 'conf-low' }}">{{ data[k].confidence }}</span></p>
                             <p><strong>Gap Médio:</strong> {{ "%.2f"|format(data[k].mean_gap) }} min</p>
-                            <p><strong>Previsão ML:</strong> {{ "%.2f"|format(data[k].predicted_gap) }} min</p>
+                            <p><strong>Previsão ML (Tempo):</strong> {{ "%.2f"|format(data[k].predicted_gap) }} min</p>
+                            <p><strong>Previsão ML (Valor):</strong> <span style="color:#28a745;font-weight:bold;">{{ "%.2f"|format(data[k].predicted_value) }}x</span></p>
                             <p><strong>Desde Último Pico:</strong> {{ data[k].current_oc }} rodadas</p>
                             <hr style="border:0.5px solid #eee; margin:10px 0;">
                             <p><strong>Próximo Pico:</strong> <span class="next-spike" data-level="{{ k.split('_')[1] }}" id="next-spike-{{ k.split('_')[1] }}" style="color:#007bff;font-weight:bold;">{{ data[k].next }}</span></p>
                             <p><strong>Janela:</strong> {{ data[k].window }}</p>
+
+                            <details open>
+                                <summary style="font-size:12px; cursor:pointer; color:#0056b3; margin-top:10px; outline:none; font-weight:bold;">Histórico (Últimas 25)</summary>
+                                <div style="font-size:11px; margin-top:5px; max-height:180px; overflow-y:auto; border:1px solid #eee; padding:5px; background:#fdfdfd;">
+                                    <table style="width:100%; border-collapse: collapse; text-align:left;">
+                                        <thead>
+                                            <tr style="border-bottom:1px solid #ccc; color:#555;">
+                                                <th style="padding:2px;">Reg. Previsão</th>
+                                                <th style="padding:2px;">Alvo (Valor)</th>
+                                                <th style="padding:2px;">Alvo (Hora)</th>
+                                                <th style="padding:2px;">Janela</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for hist in data[k].history %}
+                                            <tr style="border-bottom:1px solid #eee;">
+                                                <td style="padding:2px; color:#888;">{{ hist.prev_time if hist.prev_time else hist.spike_time }}</td>
+                                                <td style="padding:2px; font-weight:bold; color:#28a745;">{{ "%.2f"|format(hist.value) }}x</td>
+                                                <td style="padding:2px; font-weight:bold; color:#007bff;">{{ hist.next }}</td>
+                                                <td style="padding:2px; font-size:10px; color:#666;">{{ hist.window.split(' -> ')[0][:5] }} às {{ hist.window.split(' -> ')[1][:5] }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </details>
                         {% else %}
                             <p>Aguardando...</p>
                         {% endif %}
