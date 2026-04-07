@@ -200,8 +200,16 @@ def predict_optimized(data_series, threshold_label):
         scaler = StandardScaler()
         X_s = scaler.fit_transform(X)
 
-        # Ensemble: Gradient Boosting para capturar não-linearidades
-        model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+        # Anti-Overfit: O GradientBoosting puro decorava dados pequenos (Overfitting)
+        # O sistema agora escolhe o melhor regressor com base na densidade de amostras
+        n_samples = len(X)
+        if n_samples < 50:
+            # Para thresholds altos c/ poucas amostras (ex: Spikes de 50x), aplicamos Regularização L2 Ridge
+            model = Ridge(alpha=1.5)
+        else:
+            # Para muitas amostras (>2x, >5x), RandomForest usa Bagging para evitar o vício artificial
+            model = RandomForestRegressor(n_estimators=50, max_depth=3, min_samples_leaf=3, random_state=42)
+
         model.fit(X_s, y)
 
         # ====== O SEGREDO DA PREVISÃO CLARIVIDENTE ======
@@ -218,16 +226,23 @@ def predict_optimized(data_series, threshold_label):
 
         future_x = np.array(feats).reshape(1, -1)
         pred = model.predict(scaler.transform(future_x))[0]
-        return max(pred, 1.0)
+
+        mean_val = data_series.mean()
+        return max(pred, 1.0), mean_val
     except:
-        return data_series.mean()
+        return data_series.mean(), data_series.mean()
 
 # ---------------------------------------------------------------------------
 # Análise de Dados e Dashboard
 # ---------------------------------------------------------------------------
 latest_analysis = {}
 
-def analyze_spikes(df, threshold, label):
+def analyze_spikes(df_full, threshold, label):
+    # ML RE-TRAIN LIMIT: Usa todo o log para exibir pro DB, 
+    # mas APENAS as últimas 1750 rodadas para treinamento do ML e cálculo de Gaps 
+    # para evitar obsolescência precoce (A roleta muda de padrão sazonalmente a cada dia/duas semanas).
+    df = df_full.tail(1750).copy()
+
     spikes = df[df["value"] > threshold].copy()
     if len(spikes) < 3: return
 
@@ -249,12 +264,27 @@ def analyze_spikes(df, threshold, label):
     regime_name, confidence = detector.get_state(df)
 
     # Predição ML Temporal
-    pred_gap = predict_optimized(gaps, label + "_tempo")
-    mean_gap = gaps.mean()
+    pred_gap_ml, mean_gap = predict_optimized(gaps, label + "_tempo")
+
+    # Correlação: O ML (Inteligência) coincide com a Estatística Média?
+    diff_tempo = abs(pred_gap_ml - mean_gap) / (mean_gap + 1e-5)
+    is_correlated = diff_tempo <= 0.35 # Tolerância de 35% de diferença para validar Alarme
+
+    # Hibridização visual pro dashboard não gerar saltos bizarros
+    pred_gap = (pred_gap_ml * 0.70) + (mean_gap * 0.30)
 
     # Predição ML Valor Extra (Estratégia similar de ML para saídas prováveis em pico)
     spike_values = spikes["value"]
-    pred_value = predict_optimized(spike_values, label + "_valor")
+    pred_value_ml, mean_val_stat = predict_optimized(spike_values, label + "_valor")
+    pred_value = (pred_value_ml * 0.70) + (mean_val_stat * 0.30)
+
+    # Atualizador Dinâmico de Valores da ML (Contra Estagnação)
+    # Reflete o peso empírico de curto-prazo da roleta. Se ela está pagando alto nas ultimas 10 casas, a previsão "respira"
+    last_10_mean = df["value"].tail(10).mean()
+    if last_10_mean > 3.5:
+        pred_value = pred_value * 1.05 # +5% se o mercado super-aqueceu
+    elif last_10_mean < 1.5:
+        pred_value = pred_value * 0.95 # Retrai o ML se está num momento péssimo
 
     # Ajuste de Janela Dinâmica baseado na Confiança
     # Se confiança baixa, a janela de erro aumenta para evitar falsas entradas
@@ -285,12 +315,12 @@ def analyze_spikes(df, threshold, label):
     key = f'spikes_{int(threshold)}'
 
     # Injeção dos dados globais
-    if len(df) > 0:
+    if len(df_full) > 0:
         latest_analysis['now'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        latest_analysis['ultimo'] = f"{df['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')} - {df['value'].iloc[-1]:.2f}x"
-        latest_analysis['total_registros'] = len(df)
-        latest_analysis['periodo'] = f"{df['timestamp'].iloc[0].strftime('%d/%m/%Y %H:%M:%S')} -> {df['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')}"
-        last_100_df = df.tail(100)
+        latest_analysis['ultimo'] = f"{df_full['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')} - {df_full['value'].iloc[-1]:.2f}x"
+        latest_analysis['total_registros'] = len(df_full)
+        latest_analysis['periodo'] = f"{df_full['timestamp'].iloc[0].strftime('%d/%m/%Y %H:%M:%S')} -> {df_full['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')}"
+        last_100_df = df_full.tail(100)
 
         latest_analysis['counts_100'] = {
             'c2':  len(last_100_df[last_100_df['value'] >= 2]),
@@ -299,8 +329,8 @@ def analyze_spikes(df, threshold, label):
             'c50': len(last_100_df[last_100_df['value'] >= 50])
         }
 
-        # Pre-calcula rolling para o gráfico
-        df_chart = df.copy()
+        # Pre-calcula rolling para o gráfico (com limite de histórico para economia extrema de CPU)
+        df_chart = df_full.tail(1750).copy()
         df_chart["rolling_mean"]  = df_chart["value"].rolling(WINDOW_SIZE).mean()
         df_chart["rolling_slope"] = df_chart["value"].rolling(WINDOW_SIZE).apply(
             lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan,
@@ -404,10 +434,11 @@ def analyze_spikes(df, threshold, label):
         'predicted_value': pred_value,
         'regime': regime_name,
         'confidence': f"{confidence*100:.0f}%",
+        'correlated': is_correlated,
         'accuracy': accuracy_perc, # Porcentual novo
         'next': predicted_next.strftime('%H:%M:%S'),
         'window': f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}",
-        'current_oc': len(df) - 1 - df[df["value"] > threshold].index[-1],
+        'current_oc': len(df_full) - 1 - df_full[df_full["value"] > threshold].index[-1],
         'history': old_history
     }
 
@@ -415,12 +446,12 @@ def analyze_spikes(df, threshold, label):
 
     save_prediction(threshold, predicted_next, early, late)
 
-def analyze_trends(df):
+def analyze_trends(df_full):
     """Analisa tendencias usando rolling window com ajuste polinomial de grau 2."""
+    df = df_full.tail(1750).copy()
     if len(df) < WINDOW_SIZE:
         return
 
-    df = df.copy()
     df["rolling_mean"] = df["value"].rolling(WINDOW_SIZE).mean()
 
     # Slope linear (grau 1) — mantido para exibição
@@ -633,7 +664,8 @@ def dashboard():
                             <p><strong>Previsão ML (Valor):</strong> <span style="color:#28a745;font-weight:bold;">{{ "%.2f"|format(data[k].predicted_value) }}x</span></p>
                             <p><strong>Desde Último Pico:</strong> {{ data[k].current_oc }} rodadas</p>
                             <hr style="border:0.5px solid #eee; margin:10px 0;">
-                            <p><strong>Próximo Pico:</strong> <span class="next-spike" data-level="{{ k.split('_')[1] }}" data-early="{{ data[k].window.split(' -> ')[0] }}" id="next-spike-{{ k.split('_')[1] }}" style="color:#007bff;font-weight:bold;">{{ data[k].next }}</span></p>
+                            <p><strong>Próximo Pico:</strong> <span class="next-spike" data-corr="{{ '1' if data[k].correlated else '0' }}" data-level="{{ k.split('_')[1] }}" data-early="{{ data[k].window.split(' -> ')[0] }}" id="next-spike-{{ k.split('_')[1] }}" style="color:#007bff;font-weight:bold;">{{ data[k].next }}</span>
+                            <span style="font-size:10px; margin-left:5px; padding:2px 4px; border-radius:3px; font-weight:bold; color:#fff; background-color: {{ '#28a745' if data[k].correlated else '#dc3545' }}">{{ '✓ ML ALINHADO' if data[k].correlated else '⚠ ML DIVERGENTE' }}</span></p>
                             <p><strong>Janela:</strong> {{ data[k].window }}</p>
 
                             <details open>
@@ -785,38 +817,16 @@ def dashboard():
 
             window.addEventListener('DOMContentLoaded', () => {
                 let maxLevel = 0;
-                let nextSpikes = document.querySelectorAll('.next-spike');
 
-                nextSpikes.forEach(span => {
-                   let rawTime = span.innerText.trim();
-                   let earlyTime = span.getAttribute('data-early');
-                   if (!rawTime || rawTime === 'N/A' || rawTime === '' || !earlyTime) return;
-
-                   let parts = rawTime.split(':');
-                   let eParts = earlyTime.split(':');
-                   if (parts.length === 3 && eParts.length === 3) {
-                       let now = new Date();
-
-                       let target = new Date();
-                       target.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2], 10), 0);
-
-                       let startWindow = new Date();
-                       startWindow.setHours(parseInt(eParts[0], 10), parseInt(eParts[1], 10), parseInt(eParts[2], 10), 0);
-
-                       // Fix target/window around midnight crossover
-                       if (target < now && (now - target) > 12 * 3600 * 1000) target.setDate(target.getDate() + 1);
-                       if (startWindow < now && (now - startWindow) > 12 * 3600 * 1000) startWindow.setDate(startWindow.getDate() + 1);
-
-                       let diffToStartMs = startWindow - now;
-                       let diffToTargetMs = target - now;
-
-                       // Alerta de Previsão Antecipada: Dispara se faltam menos de 2 Minutos para a JANELA ABRIR, 
-                       // ou se já estamos dentro do range entre [Abertura da Janela e O Alvo exato do meio]
-                       if ((diffToStartMs > 0 && diffToStartMs < 120 * 1000) || (diffToStartMs <= 0 && diffToTargetMs > 0)) {
-                           let l = parseInt(span.getAttribute('data-level')) || 0;
-                           if (l > maxLevel) maxLevel = l;
-                       }
-                   }
+                // Mapeia exclusivamente os alertas de Saída Provável (Tendência/Estatística não ML)
+                let trendAlerts = document.querySelectorAll('.alert[data-level]');
+                trendAlerts.forEach(alerta => {
+                    let text = alerta.innerText || "";
+                    // Dispara o alerta sonoro SOMENTE se a "Previsão 1" (Próximo) apontar para >5, >10 ou >50
+                    if (text.includes("Previsão 1")) {
+                        let l = parseInt(alerta.getAttribute('data-level')) || 0;
+                        if (l > maxLevel) maxLevel = l;
+                    }
                 });
 
                 let beepCount = 0;
@@ -824,18 +834,10 @@ def dashboard():
                 else if (maxLevel === 10) beepCount = 10;
                 else if (maxLevel === 5) beepCount = 5;
 
-                let nextSpike50El = document.getElementById('next-spike-50');
-                let currentSpike50 = nextSpike50El ? nextSpike50El.innerText.trim() : 'N/A';
-                let lastSpike50 = localStorage.getItem('last_spike_50');
-
-                let spikeChanged = (currentSpike50 !== 'N/A' && lastSpike50 && currentSpike50 !== lastSpike50);
-                if (currentSpike50 !== 'N/A') localStorage.setItem('last_spike_50', currentSpike50);
-
+                // Toca os alertas sonoros baseados primariamente e exclusivamente na Saída Provável
                 if (beepCount > 0) {
                     setTimeout(() => playAlertSound(beepCount), 500);
-                } else if (spikeChanged) {
-                    setTimeout(playChangeSound, 500);
-                }
+                } 
             });
         </script>
     </body>
