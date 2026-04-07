@@ -26,10 +26,8 @@ from sklearn.model_selection import TimeSeriesSplit
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 
 # ---------------------------------------------------------------------------
 # Configurações e Caminhos
@@ -91,8 +89,11 @@ def iniciar_driver():
     options.add_argument("--log-level=3")  # Oculta mensagens não-críticas
     options.add_experimental_option('excludeSwitches', ['enable-logging']) # Desabilita devtools port warning e info messages de GCM
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    
+    # Reparo do erro OSError: [WinError 193]
+    # O driver baixado no cache da biblioteca ChromeDriverManager corrompeu.
+    # O Selenium (a partir da v4.6+) gerencia automaticamente o ChromeDriver sem precisar dele.
+    driver = webdriver.Chrome(options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
 
@@ -491,7 +492,7 @@ def analyze_trends(df_full):
             if p >= 50: color = '#007bff'
             elif p >= 10: color = '#e83e8c'
             elif p >= 5: color = '#28a745'
-            elif p >= 2: color = '#6f42c1'
+            elif p >= 2: color = '#6f42c1';
 
             latest_analysis['trends']['projections'].append({
                 'value': p, 
