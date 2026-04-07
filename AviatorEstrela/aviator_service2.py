@@ -51,26 +51,58 @@ MAX_REGISTROS = 10000
 # Novo: Detector de Regime Oculto (Minimização de Seca)
 # ---------------------------------------------------------------------------
 class RegimeDetector:
-    """Classifica o estado do jogo para evitar apostas em períodos de 'baixa'."""
-    def __init__(self, window=12):
+    """Classifica o estado do jogo para evitar apostas em períodos de 'baixa' usando Meta-Análise."""
+    def __init__(self, window=12, macro_window=12):
         self.window = window
+        self.macro_window = macro_window
 
-    def get_state(self, df):
-        if len(df) < self.window: 
-            return "Amostragem Baixa", 0.5
-        
-        recent = df.tail(self.window)['value']
-        volatility = recent.std()
-        avg = recent.mean()
-        
-        # Identificação de padrões de 'Seca' (Média baixa e Volatilidade estagnada)
+    def _evaluate_slice(self, slice_series):
+        volatility = slice_series.std()
+        avg = slice_series.mean()
+
+        # Identificação de padrões
         if avg < 1.8 and volatility < 0.8:
             return "Seca Severa", 0.15 # Confiança muito baixa
         elif avg < 2.2 and volatility > 1.2:
             return "Recuperação", 0.55 # Transição
-        elif avg > 2.8 or (recent > 10).any():
+        elif avg > 2.8 or (slice_series > 10).any():
             return "Distribuição", 0.85 # Momento propício
         return "Estável", 0.50
+
+    def get_state(self, df):
+        if len(df) < self.window: 
+            return "Amostragem Baixa", 0.5, "Indefinido", 0.5
+
+        # Análise Micro (Janela atual isolada)
+        recent = df.tail(self.window)['value']
+        regime_micro, conf_micro = self._evaluate_slice(recent)
+
+        # Meta-Análise Macro (Histórico de avaliações de confiança)
+        historico_confiancas = []
+        max_idx = len(df)
+        # Limite voltando rodada por rodada, respeitando tamanho dos dados
+        limites_analise = min(self.macro_window, max_idx - self.window + 1)
+
+        for i in range(limites_analise):
+            start = max_idx - self.window - i
+            end = max_idx - i
+            slice_series = df.iloc[start:end]['value']
+            _, conf_slice = self._evaluate_slice(slice_series)
+            historico_confiancas.append(conf_slice)
+
+        if not historico_confiancas:
+            macro_mean = conf_micro
+        else:
+            macro_mean = sum(historico_confiancas) / len(historico_confiancas)
+
+        if macro_mean <= 0.35:
+            regime_macro = "Tendência Baixa"
+        elif macro_mean <= 0.60:
+            regime_macro = "Tendência Estável"
+        else:
+            regime_macro = "Tendência Alta"
+
+        return regime_micro, conf_micro, regime_macro, macro_mean
 
 # ---------------------------------------------------------------------------
 # Funções de Log e Driver
@@ -260,9 +292,9 @@ def analyze_spikes(df_full, threshold, label):
     spikes["gap_seconds"] = spikes.groupby("session")["timestamp"].diff().dt.total_seconds()
     gaps = spikes["gap_seconds"].dropna()
 
-    # Detecção de Regime (Cérebro do Sistema)
+    # Detecção de Regime (Cérebro do Sistema - Com Meta-Análise)
     detector = RegimeDetector()
-    regime_name, confidence = detector.get_state(df)
+    regime_name, confidence, regime_macro, conf_macro = detector.get_state(df)
 
     # Predição ML Temporal
     pred_gap_ml, mean_gap = predict_optimized(gaps, label + "_tempo")
@@ -287,9 +319,10 @@ def analyze_spikes(df_full, threshold, label):
     elif last_10_mean < 1.5:
         pred_value = pred_value * 0.95 # Retrai o ML se está num momento péssimo
 
-    # Ajuste de Janela Dinâmica baseado na Confiança
-    # Se confiança baixa, a janela de erro aumenta para evitar falsas entradas
-    std_adj = (gaps.std() if len(gaps) > 1 else mean_gap * 0.3) * (1.5 - confidence)
+    # Ajuste de Janela Dinâmica baseado na Meta Confiança Combinada (Micro + Macro)
+    meta_conf_ajust = (confidence * 0.4) + (conf_macro * 0.6)
+    # Se confiança combinada for baixa, a janela de erro aumenta para evitar falsas entradas
+    std_adj = (gaps.std() if len(gaps) > 1 else mean_gap * 0.3) * (1.5 - meta_conf_ajust)
 
     # Antecipações proativas reais - O ML traz o alvo provável,
     # Mas precisamos de fato dar um lead time para o operador não ser pego de surpresa ("muito em cima da hora")
@@ -435,6 +468,8 @@ def analyze_spikes(df_full, threshold, label):
         'predicted_value': pred_value,
         'regime': regime_name,
         'confidence': f"{confidence*100:.0f}%",
+        'regime_macro': regime_macro,
+        'conf_macro': f"{conf_macro*100:.0f}%",
         'correlated': is_correlated,
         'accuracy': accuracy_perc, # Porcentual novo
         'next': predicted_next.strftime('%H:%M:%S'),
@@ -657,8 +692,16 @@ def dashboard():
                     <div class="card">
                         <h3>Spikes {{ k.replace('spikes_', '> ') }}</h3>
                         {% if k in data and data[k] %}
-                            <div class="regime">Estado Local: {{ data[k].regime }}</div>
-                            <p><strong>Confiança IA:</strong> <span class="{{ 'conf-high' if '8' in data[k].confidence or '9' in data[k].confidence else 'conf-low' }}">{{ data[k].confidence }}</span></p>
+                            <div style="display: flex; gap: 15px; margin-bottom: 15px; justify-content: center;">
+                                <div style="flex:1; padding:10px; border:1px solid #eee; border-radius:8px; text-align:center;">
+                                    <div class="regime">Local (Micro): {{ data[k].regime }}</div>
+                                    <p style="margin:5px 0;"><strong>Confiança:</strong> <br><span style="font-size:20px;" class="{{ 'conf-high' if '8' in data[k].confidence or '9' in data[k].confidence or '10' in data[k].confidence else 'conf-low' }}">{{ data[k].confidence }}</span></p>
+                                </div>
+                                <div style="flex:1; padding:10px; border:1px solid #eee; border-radius:8px; text-align:center;">
+                                    <div class="regime">Tendência (Macro): {{ data[k].regime_macro }}</div>
+                                    <p style="margin:5px 0;"><strong>Confiança:</strong> <br><span style="font-size:20px;" class="{{ 'conf-high' if '8' in data[k].conf_macro or '9' in data[k].conf_macro or '7' in data[k].conf_macro or '10' in data[k].conf_macro else 'conf-low' }}">{{ data[k].conf_macro }}</span></p>
+                                </div>
+                            </div>
                             <p><strong>Assertividade ML:</strong> <span style="font-weight:bold; color:#0056b3;">{{ data[k].accuracy }}</span></p>
                             <p><strong>Gap Médio:</strong> {{ "%.2f"|format(data[k].mean_gap) }} min</p>
                             <p><strong>Previsão ML (Tempo):</strong> {{ "%.2f"|format(data[k].predicted_gap) }} min</p>
