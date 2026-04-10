@@ -211,17 +211,30 @@ def capturar_ultimos(driver):
 
 # Cache global de modelos treinados — evita retreinar do zero a cada ciclo
 _model_cache = {}
-_MODEL_RETRAIN_INTERVAL = 50  # Só retreina após N novos dados
+# Intervalo de retreino proporcional: thresholds raros (>50x) retreinam com menos gaps novos
+_MODEL_RETRAIN_INTERVALS = {
+    'default': 50,   # Padrão para labels desconhecidos
+    '>5': 40,        # Spikes frequentes — retreina a cada ~40 gaps
+    '>10': 25,       # Spikes moderados — retreina a cada ~25 gaps
+    '>50': 10,       # Spikes raros — retreina a cada ~10 gaps (era 50!)
+}
+_MODEL_MAX_AGE_SECONDS = 7200  # Modelo expira após 2 horas independentemente
+_MODEL_CV_MAE_DEGRADE_FACTOR = 1.5  # Retreina se CV MAE atual > 1.5x o CV MAE do treino
 _MODEL_PERSIST_DIR = os.path.join(BASE_DIR, "ml_models")
 os.makedirs(_MODEL_PERSIST_DIR, exist_ok=True)
 
-def build_features(gaps: pd.Series, timestamps: pd.Series = None):
+def _safe_filename(name):
+    """Sanitiza nome para uso como arquivo no Windows (remove caracteres invalidos)."""
+    return name.replace('>', 'gt').replace('<', 'lt').replace(':', '_').replace('"', '_').replace('|', '_').replace('?', '_').replace('*', '_')
+
+
+def build_features(gaps: pd.Series, timestamps: pd.Series = None, forced_lag: int = None):
     """
     Constrói features a partir de janela deslizante sobre os gaps.
     Se timestamps for fornecido, adiciona features cíclicas de hora e dia.
     """
     n = len(gaps)
-    lag = 5 if n > 15 else 3
+    lag = forced_lag if forced_lag is not None else (5 if n > 15 else 3)
     X, y = [], []
     for i in range(lag, n):
         window = gaps.iloc[i-lag:i]
@@ -266,20 +279,61 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
         return mean_val, mean_val
 
     try:
-        X, y = build_features(data_series, spike_timestamps)
+        # Calcula lag UMA VEZ baseado em data_series e reutiliza em treino e previsão
+        n = len(data_series)
+        lag = 5 if n > 15 else 3
+        n_features = lag + 10  # lag values + 6 estatísticas + 4 cíclicas
+
+        X, y = build_features(data_series, spike_timestamps, forced_lag=lag)
         n_samples = len(X)
 
         if n_samples < 3:
             mean_val = float(data_series.mean())
             return mean_val, mean_val
 
-        # Cache de modelo — só retreina quando há dados novos suficientes
+        # Cache de modelo — retreina por múltiplos critérios inteligentes
         cache_key = threshold_label
         cached = _model_cache.get(cache_key)
+        cached_n_features = cached.get('n_features') if cached else None
+
+        # Determina intervalo de retreino proporcional ao threshold
+        base_label = threshold_label.split('_')[0]  # ">5_tempo" -> ">5"
+        retrain_interval = _MODEL_RETRAIN_INTERVALS.get(base_label, _MODEL_RETRAIN_INTERVALS['default'])
+
+        # Critério de expiração por tempo (modelo velho demais)
+        is_expired = False
+        if cached and 'trained_at' in cached:
+            age = time.time() - cached['trained_at']
+            is_expired = age >= _MODEL_MAX_AGE_SECONDS
+
+        # Critério de degradação de performance (CV MAE subiu demais)
+        is_degraded = False
+        if cached and cached.get('cv_mae') and n_samples > 50:
+            # Calcula MAE rápido nas últimas amostras contra o modelo atual
+            try:
+                recent_n = min(20, n_samples)
+                X_recent = X[-recent_n:]
+                y_recent = y[-recent_n:]
+                X_recent_s = cached['scaler'].transform(X_recent)
+                preds_recent = cached['model'].predict(X_recent_s)
+                recent_mae = float(np.mean(np.abs(y_recent - preds_recent)))
+                is_degraded = recent_mae > cached['cv_mae'] * _MODEL_CV_MAE_DEGRADE_FACTOR
+                if is_degraded:
+                    log(f"[RETRAIN] {threshold_label}: MAE recente ({recent_mae:.2f}) > {_MODEL_CV_MAE_DEGRADE_FACTOR}x CV MAE treino ({cached['cv_mae']:.2f}). Forçando retreino.")
+            except:
+                pass  # Se falhar (ex: features mudaram), o critério n_features já cobre
+
         needs_retrain = (
             cached is None
-            or abs(n_samples - cached['n_samples']) >= _MODEL_RETRAIN_INTERVAL
+            or abs(n_samples - cached['n_samples']) >= retrain_interval
+            or cached_n_features != n_features
+            or is_expired
+            or is_degraded
         )
+
+        if is_expired and cached:
+            age_min = (time.time() - cached.get('trained_at', 0)) / 60
+            log(f"[RETRAIN] {threshold_label}: Modelo expirado ({age_min:.0f} min). Forçando retreino.")
 
         if needs_retrain:
             scaler = StandardScaler()
@@ -324,25 +378,24 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
                 'model': model,
                 'scaler': scaler,
                 'n_samples': n_samples,
-                'cv_mae': cv_mae
+                'n_features': n_features,
+                'cv_mae': cv_mae,
+                'trained_at': time.time()
             }
 
             # Persistir modelo em disco para sobreviver a reinícios
             try:
-                persist_path = os.path.join(_MODEL_PERSIST_DIR, f"{cache_key}.pkl")
+                persist_path = os.path.join(_MODEL_PERSIST_DIR, f"{_safe_filename(cache_key)}.pkl")
                 joblib.dump(_model_cache[cache_key], persist_path)
             except Exception as e:
                 log(f"[WARN] Falha ao persistir modelo {cache_key}: {e}")
 
-            log(f"Modelo [{threshold_label}] treinado com {n_samples} amostras.")
+            log(f"Modelo [{threshold_label}] treinado com {n_samples} amostras ({n_features} features, intervalo={retrain_interval}).")
         else:
             model = cached['model']
             scaler = cached['scaler']
 
         # ====== Previsão do FUTURO ======
-        n = len(data_series)
-        lag = 5 if n > 15 else 3
-
         future_window = data_series.iloc[-lag:]
         feats = list(future_window.values)
         feats.append(future_window.mean())
@@ -365,7 +418,14 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
         pred = model.predict(scaler.transform(future_x))[0]
 
         mean_val = data_series.mean()
-        return max(pred, 1.0), mean_val
+
+        # Clamp: limita a previsão ao range razoável do histórico
+        # Evita extrapolações absurdas (ex: prever 4007x quando o P95 real é 30x)
+        p95 = float(np.percentile(data_series, 95))
+        upper_bound = max(p95 * 2.0, mean_val * 3.0)
+        pred = float(np.clip(pred, 1.0, upper_bound))
+
+        return pred, mean_val
 
     except Exception as e:
         log(f"[WARN] predict_optimized({threshold_label}) falhou: {e}")
@@ -381,9 +441,29 @@ def _load_cached_models():
     for fname in os.listdir(_MODEL_PERSIST_DIR):
         if fname.endswith('.pkl'):
             try:
-                key = fname.replace('.pkl', '')
-                _model_cache[key] = joblib.load(os.path.join(_MODEL_PERSIST_DIR, fname))
-                log(f"Modelo [{key}] carregado do disco ({_model_cache[key]['n_samples']} amostras).")
+                # Reverte sanitizacao do nome do arquivo para a cache_key original
+                key = fname.replace('.pkl', '').replace('gt', '>').replace('lt', '<')
+                loaded = joblib.load(os.path.join(_MODEL_PERSIST_DIR, fname))
+                # Descarta modelos antigos que não possuem n_features (incompatíveis)
+                if 'n_features' not in loaded:
+                    log(f"[WARN] Modelo [{key}] descartado (formato antigo sem n_features).")
+                    os.remove(os.path.join(_MODEL_PERSIST_DIR, fname))
+                    continue
+                # Descarta modelos expirados por tempo (salvos há mais de _MODEL_MAX_AGE_SECONDS)
+                if 'trained_at' in loaded:
+                    age = time.time() - loaded['trained_at']
+                    if age >= _MODEL_MAX_AGE_SECONDS:
+                        log(f"[WARN] Modelo [{key}] descartado (expirado: {age/60:.0f} min).")
+                        os.remove(os.path.join(_MODEL_PERSIST_DIR, fname))
+                        continue
+                else:
+                    # Modelo sem trained_at = formato antigo, descarta
+                    log(f"[WARN] Modelo [{key}] descartado (sem timestamp de treino).")
+                    os.remove(os.path.join(_MODEL_PERSIST_DIR, fname))
+                    continue
+                _model_cache[key] = loaded
+                age_min = (time.time() - loaded['trained_at']) / 60
+                log(f"Modelo [{key}] carregado do disco ({loaded['n_samples']} amostras, {loaded['n_features']} features, idade={age_min:.0f} min).")
             except Exception as e:
                 log(f"[WARN] Falha ao carregar modelo {fname}: {e}")
 
@@ -453,12 +533,18 @@ def analyze_spikes(df_full, threshold, label):
         spike_values.reset_index(drop=True), label + "_valor",
         spikes["timestamp"].reset_index(drop=True)
     )
-    pred_value = pred_value_ml
+    # Clamp final de segurança: valor previsto nunca ultrapassa o maior spike já registrado
+    max_spike_real = float(spike_values.max())
+    pred_value = min(pred_value_ml, max_spike_real)
 
     last_spike = spikes["timestamp"].iloc[-1]
     predicted_next = last_spike + timedelta(seconds=pred_gap)
-    early = predicted_next - timedelta(seconds=pred_gap * 0.15)
-    late = predicted_next + timedelta(seconds=pred_gap * 0.15)
+
+    # Margem da janela: ±25% do gap previsto, com piso mínimo de 60 segundos
+    # Evita janelas absurdamente estreitas quando o pred_gap é muito pequeno
+    margin = max(pred_gap * 0.25, 60.0)
+    early = predicted_next - timedelta(seconds=margin)
+    late = predicted_next + timedelta(seconds=margin)
 
     key = f'spikes_{int(threshold)}'
 
@@ -524,15 +610,20 @@ def analyze_spikes(df_full, threshold, label):
                 old_history = json.load(f).get(key, [])
         except: pass
 
+    last_spike_iso = last_spike.strftime('%Y-%m-%d %H:%M:%S')
     last_spike_str = last_spike.strftime('%H:%M:%S')
 
-    # Store the prediction in history, unique per last_spike (so it only updates when a new spike hits)
-    if not any(h['spike_time'] == last_spike_str for h in old_history):
+    # Store the prediction in history, unique per last_spike (deduplicação por timestamp completo)
+    if not any(h.get('spike_ts', h.get('spike_time')) == last_spike_iso for h in old_history):
         old_history.insert(0, {
             'prev_time': datetime.now().strftime('%H:%M:%S'),
             'spike_time': last_spike_str,
+            'spike_ts': last_spike_iso,
             'next': predicted_next.strftime('%H:%M:%S'),
+            'next_ts': predicted_next.strftime('%Y-%m-%d %H:%M:%S'),
             'window': f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}",
+            'window_start_ts': early.strftime('%Y-%m-%d %H:%M:%S'),
+            'window_end_ts': late.strftime('%Y-%m-%d %H:%M:%S'),
             'value': pred_value,
             'predicted_gap': pred_gap
         })
@@ -549,25 +640,32 @@ def analyze_spikes(df_full, threshold, label):
         except: pass
 
     # ============================================================
-    # Métrica de Assertividade Dinâmica
+    # Métrica de Assertividade Dinâmica (com timestamps completos)
     # ============================================================
     hits = 0
     evaluated = 0
     for i in range(1, len(old_history)):
         try:
-            # O momento real em que caiu a vela (avaliando a predição i, a resposta é a i-1)
-            real_spike_str = old_history[i-1]['spike_time']
-            start_str, end_str = old_history[i]['window'].split(' -> ')
+            # A previsão [i] dizia: "o PRÓXIMO spike cairá na janela X"
+            # O spike que realmente veio depois é registrado em [i-1]
+            pred_entry = old_history[i]
+            real_entry = old_history[i-1]
 
-            # Converte em objetos tempo puro para matemática
-            rs_t = datetime.strptime(real_spike_str, "%H:%M:%S")
-            s_t = datetime.strptime(start_str, "%H:%M:%S")
-            e_t = datetime.strptime(end_str, "%H:%M:%S")
-
-            # Repara cruzamento de meia-noite (Virada 23:xx pra 00:xx)
-            if e_t < s_t:
-                e_t += timedelta(days=1)
-                if rs_t < s_t and rs_t.hour < 12: rs_t += timedelta(days=1)
+            # Usa timestamps completos (ISO) quando disponíveis, senão fallback HH:MM:SS
+            if 'spike_ts' in real_entry and 'window_start_ts' in pred_entry:
+                rs_t = datetime.strptime(real_entry['spike_ts'], '%Y-%m-%d %H:%M:%S')
+                s_t = datetime.strptime(pred_entry['window_start_ts'], '%Y-%m-%d %H:%M:%S')
+                e_t = datetime.strptime(pred_entry['window_end_ts'], '%Y-%m-%d %H:%M:%S')
+            else:
+                # Fallback legado (entradas antigas sem _ts)
+                real_spike_str = real_entry.get('spike_time', '')
+                start_str, end_str = pred_entry['window'].split(' -> ')
+                rs_t = datetime.strptime(real_spike_str, "%H:%M:%S")
+                s_t = datetime.strptime(start_str, "%H:%M:%S")
+                e_t = datetime.strptime(end_str, "%H:%M:%S")
+                if e_t < s_t:
+                    e_t += timedelta(days=1)
+                    if rs_t < s_t and rs_t.hour < 12: rs_t += timedelta(days=1)
 
             if s_t <= rs_t <= e_t:
                 hits += 1
