@@ -9,13 +9,12 @@ Este projeto é um sistema automatizado para extração, análise preditiva e projeç
 O projeto processa continuamente o histórico da plataforma através do Selenium, salva os resultados detectados em arquivos base, treina/sonda os dados acumulados através de Algoritmos Estatísticos (Regressões Polinomiais) e Machine Learning Ensemble (SkLearn, RandomForest e GradientBoosting) para retornar alertas precisos em tela na porta local com Dashboard Flask interativo.
 
 ### O sistema é dividido nas duas versões e evoluções distintas:
-1. **`AviatorService.py`** 
-   * A versão original de rastreio de tendências da roleta. Utiliza Regressão baseada em *RandomForest* e janela de rolagem para achar gaps de tempos longos. Conta com alarmes sonoros clássicos via JS para alertas diretos na interface do usuário.
 2. **`aviator_service2.py`** _(Recomendada - Versão Stacked Regime Detector)_
     * Uma versão evoluída, com detecção e classificação em tempo real do **Regime (Estado) do Jogo** (Seca Severa, Recuperação, Estável, Distribuição). 
     * Ajusta a janela de probabilidades na detecção com bases em *Stacked Ensemble* (GradientBoosting). 
     * **Novidade ML**: Extrai regressões para prever simultaneamente a **Janela de Tempo (Horário)** em que um pico vai cair, bem como **O Valor do Pico Esperado** (`x20.4`, `x55.2`, etc.).
     * **Histórico de Previsões ("Transparência ML")**: Armazena permanentemente em disco (via `ml_history.json`) as últimas 25 previsões geradas, exibindo o Timestamp real de _quando_ a I.A gerou a previsão contraposta à hora em que espera-se o pico. Isso ajuda a medir o nível de antecipação real do robô!
+    * **Alerta Sonoro Local**: Emite um bipe duplo diretamente no sistema operacional sempre que a janela de previsão para picos de `>50x` é atualizada, garantindo que o operador seja notificado de mudanças críticas mesmo sem estar olhando para a tela.
     * **Saídas Prováveis e Cruzamento (Polinomial)**: A linha de 'rolling' calcula a curvatura baseada na ponta da montanha russa para traçar passos de tendências com cores interativas (`>2 roxo`, `>5 verde`, `>10 rosa`, `>50 azul`) coladas lado-a-lado nas bolhas de histórico de rodadas passadas listadas no HTML.
 
 ?? Recomenda-se hoje o uso irrestrito do script primário: **`aviator_service2.py`**
@@ -71,6 +70,10 @@ INTERVALO_SEGUNDOS = 20
 MAX_REGISTROS = 10000
 
 # Contas e Autenticações (Apenas contas tipminer já logadas):
+crie uma conta gratuita no site https://www.tipminer.com e atualize o email e senha nas linhas
+
+37 e 38 do arquivo aviator_service2.py
+
 EMAIL = "seu_email_secreto"
 SENHA = "sua_senha_secreta"
 ```

@@ -10,13 +10,14 @@ import time
 import json
 import joblib
 import threading
+import winsound
 import numpy as np
 import pandas as pd
 from datetime import date, datetime, timedelta
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request
 
 # ML & Preprocessing
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, StackingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error
@@ -34,7 +35,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # ---------------------------------------------------------------------------
 LOGIN_URL = "https://www.tipminer.com/br/historico/estrelabet/aviator"
 EMAIL = "marcossa73.ms@gmail.com"
-SENHA = "Mrcs3@46"
+SENHA = "Mrcs3@46(*&"
 
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE      = os.path.join(BASE_DIR, "resultados_aviator.txt")
@@ -194,10 +195,10 @@ def capturar_ultimos(driver):
                 # Se o horário do chute no site for por exemplo 23:59 e agora for 00:01
                 # o dt_tentativa cai no 'hoje' as 23:59 (Quase 24h no futuro)
                 data_correta = ontem_str if dt_tentativa > now + timedelta(minutes=5) else hoje_str
+                ts = datetime.strptime(f"{data_correta} {hora}", "%d/%m/%Y %H:%M:%S")
+                novos.append((val, ts.timestamp()))
             except:
-                data_correta = hoje_str
-
-            novos.append((val, hora, data_correta))
+                continue
 
         return novos
     except Exception as e:
@@ -217,6 +218,9 @@ def build_features(gaps: pd.Series):
         feats.append(window.mean())
         feats.append(window.std() if len(window) > 1 else 0)
         feats.append(window.iloc[-1] / (window.mean() + 1e-6)) # Ratio
+        feats.append(window.min())
+        feats.append(window.max())
+        feats.append(window.max() - window.min())  # Range
         X.append(feats)
         y.append(gaps.iloc[i])
     return np.array(X), np.array(y)
@@ -226,22 +230,32 @@ def predict_optimized(data_series, threshold_label):
     Treina o modelo usando o passado (X, y) 
     E preve O FUTURO criando features a partir dos ultimos 'lag' observados.
     """
-    if len(data_series) < 10: return data_series.mean()
+    if len(data_series) < 10: return data_series.mean(), data_series.mean()
 
     try:
         X, y = build_features(data_series)
         scaler = StandardScaler()
         X_s = scaler.fit_transform(X)
 
-        # Anti-Overfit: O GradientBoosting puro decorava dados pequenos (Overfitting)
-        # O sistema agora escolhe o melhor regressor com base na densidade de amostras
-        n_samples = len(X)
-        if n_samples < 50:
-            # Para thresholds altos c/ poucas amostras (ex: Spikes de 50x), aplicamos Regularização L2 Ridge
-            model = Ridge(alpha=1.5)
-        else:
-            # Para muitas amostras (>2x, >5x), RandomForest usa Bagging para evitar o vício artificial
-            model = RandomForestRegressor(n_estimators=50, max_depth=3, min_samples_leaf=3, random_state=42)
+        # Anti-Overfit: Use Stacking Ensemble for better generalization and accuracy
+        base_models = [
+            ('ridge', Ridge(alpha=1.0)),
+            ('rf', RandomForestRegressor(n_estimators=50, max_depth=5, min_samples_leaf=3, random_state=42)),
+            ('gb', GradientBoostingRegressor(n_estimators=50, max_depth=3, random_state=42))
+        ]
+        model = StackingRegressor(estimators=base_models, final_estimator=Ridge(alpha=0.5), cv=3)
+
+        # Optional: Cross-validate to ensure robustness
+        if n_samples > 50:
+            tscv = TimeSeriesSplit(n_splits=3)
+            scores = []
+            for train_idx, val_idx in tscv.split(X):
+                model_temp = StackingRegressor(estimators=base_models, final_estimator=Ridge(alpha=0.5), cv=3)
+                model_temp.fit(X_s[train_idx], y[train_idx])
+                pred_val = model_temp.predict(X_s[val_idx])
+                scores.append(mean_absolute_error(y[val_idx], pred_val))
+            avg_score = np.mean(scores)
+            log(f"CV MAE for {threshold_label}: {avg_score:.2f}")
 
         model.fit(X_s, y)
 
@@ -256,6 +270,9 @@ def predict_optimized(data_series, threshold_label):
         feats.append(future_window.mean())
         feats.append(future_window.std() if len(future_window) > 1 else 0)
         feats.append(future_window.iloc[-1] / (future_window.mean() + 1e-6))
+        feats.append(future_window.min())
+        feats.append(future_window.max())
+        feats.append(future_window.max() - future_window.min())
 
         future_x = np.array(feats).reshape(1, -1)
         pred = model.predict(scaler.transform(future_x))[0]
@@ -292,6 +309,13 @@ def analyze_spikes(df_full, threshold, label):
     spikes["gap_seconds"] = spikes.groupby("session")["timestamp"].diff().dt.total_seconds()
     gaps = spikes["gap_seconds"].dropna()
 
+    # Gaps Medidos em Quantidade de Rodadas (Distância entre ocorrências)
+    df_temp["round_idx"] = np.arange(len(df_temp))
+    spikes["round_idx"] = df_temp.loc[spikes.index, "round_idx"]
+    spikes["gap_rounds"] = spikes.groupby("session")["round_idx"].diff()
+    gaps_rounds = spikes["gap_rounds"].dropna()
+    mean_gap_rounds = gaps_rounds.mean() if len(gaps_rounds) > 0 else 0
+
     # Detecção de Regime (Cérebro do Sistema - Com Meta-Análise)
     detector = RegimeDetector()
     regime_name, confidence, regime_macro, conf_macro = detector.get_state(df)
@@ -299,52 +323,26 @@ def analyze_spikes(df_full, threshold, label):
     # Predição ML Temporal
     pred_gap_ml, mean_gap = predict_optimized(gaps, label + "_tempo")
 
-    # Correlação: O ML (Inteligência) coincide com a Estatística Média?
-    diff_tempo = abs(pred_gap_ml - mean_gap) / (mean_gap + 1e-5)
-    is_correlated = diff_tempo <= 0.35 # Tolerância de 35% de diferença para validar Alarme
+    # Predição ML Rodadas Extras
+    pred_gap_rounds_ml, _ = predict_optimized(gaps_rounds, label + "_rounds")
 
-    # Hibridização visual pro dashboard não gerar saltos bizarros
-    pred_gap = (pred_gap_ml * 0.70) + (mean_gap * 0.30)
+    # Correlação: O ML (Inteligência) coincide com a Estatística Média?
+    diff_temo = abs(pred_gap_ml - mean_gap) / (mean_gap + 1e-5)
+    is_correlated = diff_temo <= 0.35 # Tolerância de 35% de diferença para validar Alarme
+
+    # Utiliza o algoritmo do ML 100% puro sem interferência de médias estatísticas (Hibridização removida)
+    pred_gap = pred_gap_ml
+    pred_gap_rounds = pred_gap_rounds_ml
 
     # Predição ML Valor Extra (Estratégia similar de ML para saídas prováveis em pico)
     spike_values = spikes["value"]
     pred_value_ml, mean_val_stat = predict_optimized(spike_values, label + "_valor")
-    pred_value = (pred_value_ml * 0.70) + (mean_val_stat * 0.30)
+    pred_value = pred_value_ml
 
-    # Atualizador Dinâmico de Valores da ML (Contra Estagnação)
-    # Reflete o peso empírico de curto-prazo da roleta. Se ela está pagando alto nas ultimas 10 casas, a previsão "respira"
-    last_10_mean = df["value"].tail(10).mean()
-    if last_10_mean > 3.5:
-        pred_value = pred_value * 1.05 # +5% se o mercado super-aqueceu
-    elif last_10_mean < 1.5:
-        pred_value = pred_value * 0.95 # Retrai o ML se está num momento péssimo
-
-    # Ajuste de Janela Dinâmica baseado na Meta Confiança Combinada (Micro + Macro)
-    meta_conf_ajust = (confidence * 0.4) + (conf_macro * 0.6)
-    # Se confiança combinada for baixa, a janela de erro aumenta para evitar falsas entradas
-    std_adj = (gaps.std() if len(gaps) > 1 else mean_gap * 0.3) * (1.5 - meta_conf_ajust)
-
-    # Antecipações proativas reais - O ML traz o alvo provável,
-    # Mas precisamos de fato dar um lead time para o operador não ser pego de surpresa ("muito em cima da hora")
-    # Subtraímos também 10% do gap provável como gordura garantida no inicio do balão
-    safety_margin = pred_gap * 0.10
-
-    # ---------------------------------------------------------------------------------
-    # FIX: Evita o congelamento (Congelamento de estatística de >50 no passado)
-    # ---------------------------------------------------------------------------------
     last_spike = spikes["timestamp"].iloc[-1]
-    now_ts_roleta = df["timestamp"].iloc[-1] # Fuso atual correspondente real da roleta
-    time_since_last = (now_ts_roleta - last_spike).total_seconds()
-
-    # Se o tempo que JÁ passou for maior que a previsão, significa que o Pico está ATRASADO.
-    # Para não congelar a janela no passado, forçamos o ML a caminhar para frente usando o desvio padrão 
-    # atuando como um radar "Em tempo real" que se atualiza a cada varredura atrasada.
-    if time_since_last > pred_gap:
-        pred_gap = time_since_last + (std_adj * 0.5) # Atualiza a estimativa empiricamente pra frente
-
     predicted_next = last_spike + timedelta(seconds=pred_gap)
-    early = predicted_next - timedelta(seconds=(std_adj + safety_margin))
-    late = predicted_next + timedelta(seconds=(std_adj + safety_margin))
+    early = predicted_next - timedelta(seconds=pred_gap * 0.15)
+    late = predicted_next + timedelta(seconds=pred_gap * 0.15)
 
     key = f'spikes_{int(threshold)}'
 
@@ -354,8 +352,9 @@ def analyze_spikes(df_full, threshold, label):
         latest_analysis['ultimo'] = f"{df_full['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')} - {df_full['value'].iloc[-1]:.2f}x"
         latest_analysis['total_registros'] = len(df_full)
         latest_analysis['periodo'] = f"{df_full['timestamp'].iloc[0].strftime('%d/%m/%Y %H:%M:%S')} -> {df_full['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')}"
-        last_100_df = df_full.tail(100)
 
+        # Mantém o cálculo original para as contagens
+        last_100_df = df_full.tail(100)
         latest_analysis['counts_100'] = {
             'c2':  len(last_100_df[last_100_df['value'] >= 2]),
             'c5':  len(last_100_df[last_100_df['value'] >= 5]),
@@ -363,8 +362,8 @@ def analyze_spikes(df_full, threshold, label):
             'c50': len(last_100_df[last_100_df['value'] >= 50])
         }
 
-        # Pre-calcula rolling para o gráfico (com limite de histórico para economia extrema de CPU)
-        df_chart = df_full.tail(1750).copy()
+        # Aumenta o buffer de histórico para a função 'carregar mais'
+        df_chart = df_full.tail(1000).copy()
         df_chart["rolling_mean"]  = df_chart["value"].rolling(WINDOW_SIZE).mean()
         df_chart["rolling_slope"] = df_chart["value"].rolling(WINDOW_SIZE).apply(
             lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan,
@@ -381,10 +380,8 @@ def analyze_spikes(df_full, threshold, label):
         # A previsão da rodada ATUAL é a "pred_next" da rodada ANTERIOR (shift 1)
         df_chart["saida_provavel"] = df_chart["pred_next"].shift(1)
 
-        df_chart_sliced = df_chart.tail(100)
-
         last_100_formatted = []
-        for _, r in df_chart_sliced.iterrows():
+        for _, r in df_chart.iterrows():
             val = r['value']
             color = '#6c757d'
             if val >= 50: color = '#007bff'
@@ -398,7 +395,8 @@ def analyze_spikes(df_full, threshold, label):
                 'rolling_mean': float(r['rolling_mean']) if not pd.isna(r['rolling_mean']) else None,
                 'projection': float(r['saida_provavel']) if not pd.isna(r['saida_provavel']) else None
             })
-        latest_analysis['last_100'] = last_100_formatted
+        latest_analysis['raw_history'] = last_100_formatted
+        latest_analysis['last_100'] = last_100_formatted[-100:]
 
     old_history = latest_analysis.get(key, {}).get('history', [])
 
@@ -419,7 +417,8 @@ def analyze_spikes(df_full, threshold, label):
             'spike_time': last_spike_str,
             'next': predicted_next.strftime('%H:%M:%S'),
             'window': f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}",
-            'value': pred_value
+            'value': pred_value,
+            'predicted_gap': pred_gap
         })
         old_history = old_history[:25] # Keep last 25 predictions
         # Save persistence
@@ -461,10 +460,21 @@ def analyze_spikes(df_full, threshold, label):
 
     accuracy_perc = f"{(hits / evaluated * 100):.0f}%" if evaluated > 0 else "N/A"
 
+    # Adicionado: Alerta sonoro para mudança na janela de >50x
+    new_window_str = f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}"
+    old_window_str = latest_analysis.get(key, {}).get('window')
+    if threshold == 50.0 and old_window_str and new_window_str != old_window_str:
+        log("!!! Janela de >50x ATUALIZADA. Emitindo alerta sonoro. !!!")
+        winsound.Beep(800, 250) # Frequência, Duração em ms
+        time.sleep(0.1)
+        winsound.Beep(800, 250)
+
     latest_analysis[key] = {
         'total': len(spikes),
         'mean_gap': mean_gap / 60,
+        'mean_gap_rounds': mean_gap_rounds,
         'predicted_gap': pred_gap / 60,
+        'predicted_gap_rounds': pred_gap_rounds,
         'predicted_value': pred_value,
         'regime': regime_name,
         'confidence': f"{confidence*100:.0f}%",
@@ -549,25 +559,36 @@ def load_data_for_analysis():
     with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
         linhas = [line.strip() for line in f if line.strip()]
         
-    now = datetime.now()
+    now = datetime.now();
     
+    new_lines = []
     for line in linhas:
         p = line.split(";")
-        if len(p) == 3:
+        if len(p) >= 2:
             try:
                 val = float(p[0].replace(",", "."))
-                ts = datetime.strptime(f"{p[2]} {p[1]}", "%d/%m/%Y %H:%M:%S")
-                
-                # Correção Dinâmica de Timestamp Retroativo:
-                # Se o horário gravado no arquivo de texto constar como sendo MAIOR (no Futuro) 
-                # do que a vida real presente (Ex: Script rodou as 00:01 e processou uma linha marcada ás 23:59 "hoje"),
-                # Devemos subtrair precisamente 1 dia desse registro para devolvê-lo ao "passado" correto de "Ontem".
-                if ts > now + timedelta(minutes=5):
-                    ts -= timedelta(days=1)
-                    
+                if len(p) == 2:
+                    # New format: value;timestamp
+                    ts = datetime.fromtimestamp(float(p[1]))
+                    new_lines.append(line)  # already new
+                elif len(p) == 3:
+                    # Old format: value;hora;data
+                    ts = datetime.strptime(f"{p[2]} {p[1]}", "%d/%m/%Y %H:%M:%S")
+                    # Correção Dinâmica de Timestamp Retroativo
+                    if ts > now + timedelta(minutes=5):
+                        ts -= timedelta(days=1)
+                    new_lines.append(f"{p[0]};{ts.timestamp()}")
+                else:
+                    continue
                 data.append({"value": val, "timestamp": ts})
             except: continue
-                
+    
+    # Convert the file if any old format
+    if new_lines and new_lines != linhas:
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+            for nl in new_lines:
+                f.write(nl + "\n")
+    
     if not data: return pd.DataFrame()
     
     # data está com os mais novos no topo
@@ -674,9 +695,9 @@ def dashboard():
                     <h3>Últimas 100 Ocorrências</h3>
                     <canvas id="historyChart" width="400" height="80"></canvas>
                     <div class="history-list">
-                        {% if data.last_100 %}
-                            {% for item in data.last_100|reverse %}
-                                <div style="display:inline-flex; flex-direction:column; align-items:center; min-width:40px;">
+                        {% if data.raw_history %}
+                            {% for item in data.raw_history|reverse %}
+                                <div class="history-item-div" style="display:inline-flex; flex-direction:column; align-items:center; min-width:40px; {% if loop.index > 100 %}display: none;{% endif %}">
                                     <span style="font-size:10px; color:#888; line-height:1;" title="Saída Provável Calculada (Projeção Polinomial)">
                                         {% if item.projection %}{{ "%.2f"|format(item.projection) }}x{% else %}--{% endif %}
                                     </span>
@@ -685,6 +706,7 @@ def dashboard():
                             {% endfor %}
                         {% endif %}
                     </div>
+                    <button id="load-more" style="margin-top:10px; padding:8px 12px; background:#007bff; color:#fff; border:none; border-radius:5px; cursor:pointer;">Carregar Mais Histórico</button>
                 </div>
 
                 <div class="grid-3">
@@ -703,8 +725,8 @@ def dashboard():
                                 </div>
                             </div>
                             <p><strong>Assertividade ML:</strong> <span style="font-weight:bold; color:#0056b3;">{{ data[k].accuracy }}</span></p>
-                            <p><strong>Gap Médio:</strong> {{ "%.2f"|format(data[k].mean_gap) }} min</p>
-                            <p><strong>Previsão ML (Tempo):</strong> {{ "%.2f"|format(data[k].predicted_gap) }} min</p>
+                            <p><strong>Gap Médio:</strong> {{ "%.2f"|format(data[k].mean_gap) }} min / {{ "%.0f"|format(data[k].mean_gap_rounds) }} rodadas</p>
+                            <p><strong>Previsão ML (Tempo):</strong> {{ "%.2f"|format(data[k].predicted_gap) }} min / {{ "%.0f"|format(data[k].predicted_gap_rounds) }} rodadas</p>
                             <p><strong>Previsão ML (Valor):</strong> <span style="color:#28a745;font-weight:bold;">{{ "%.2f"|format(data[k].predicted_value) }}x</span></p>
                             <p><strong>Desde Último Pico:</strong> {{ data[k].current_oc }} rodadas</p>
                             <hr style="border:0.5px solid #eee; margin:10px 0;">
@@ -750,7 +772,7 @@ def dashboard():
             const canvas = document.getElementById('historyChart');
             if(canvas) {
                 const ctx = canvas.getContext('2d');
-                const lastData = {{ data.last_100|tojson if data.last_100 else '[]' }};
+                const lastData = {{ data.raw_history|tojson if data.raw_history else '[]' }};
                 const chartData = lastData.slice(-50); 
                 const labels = chartData.map(d => d.time);
                 const values = chartData.map(d => d.value);
@@ -845,7 +867,7 @@ def dashboard():
             function playChangeSound() {
                 if(!soundEnabled) return;
                 try {
-                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const ctx = new (window.AudioContext || window.webkit.AudioContext)();
                     const osc = ctx.createOscillator();
                     osc.type = 'sine';
                     osc.frequency.setValueAtTime(600, ctx.currentTime);
@@ -883,6 +905,32 @@ def dashboard():
                     setTimeout(() => playAlertSound(beepCount), 500);
                 } 
             });
+
+            // Load More History
+            let currentShown = parseInt(localStorage.getItem('historyShown')) || 100;
+            const loadMoreBtn = document.getElementById('load-more');
+            if(loadMoreBtn) {
+                // Initially show up to currentShown
+                const items = document.querySelectorAll('.history-item-div');
+                for(let i = 0; i < Math.min(currentShown, items.length); i++) {
+                    items[i].style.display = 'inline-flex';
+                }
+                if(currentShown >= items.length) {
+                    loadMoreBtn.style.display = 'none';
+                }
+
+                loadMoreBtn.addEventListener('click', () => {
+                    const items = document.querySelectorAll('.history-item-div');
+                    for(let i = currentShown; i < currentShown + 100 && i < items.length; i++) {
+                        items[i].style.display = 'inline-flex';
+                    }
+                    currentShown += 100;
+                    localStorage.setItem('historyShown', currentShown);
+                    if(currentShown >= items.length) {
+                        loadMoreBtn.style.display = 'none';
+                    }
+                });
+            }
         </script>
     </body>
     </html>
@@ -902,33 +950,33 @@ def main_loop():
             novos = capturar_ultimos(driver)
             if novos:
                 # Lógica de persistência (mesclar e salvar)
-                existentes = []
+                dirigentes = []
+                recentes_fingerprints = set()  # Initialize to prevent NameError
                 if os.path.exists(OUTPUT_FILE):
                     with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
-                        existentes = [l.strip() for l in f if l.strip()]
+                        dirigentes = [l.strip() for l in f if l.strip()]
                 
                 # Criar chaves limitadas aos ultimos 100 para filtro anti-duplicação severo
                 # Vamos identificar como duplicado se o valor E a hora forem idênticos a algo recente
-                recentes = existentes[:100]
-                recentes_fingerprints = set([f"{r.split(';')[0]};{r.split(';')[1]}" for r in recentes if len(r.split(';')) >= 2])
+                recentes = dirigentes[:100]
+                recientes_fingerprints = set([f"{r.split(';')[0]};{r.split(';')[1]}" for r in recentes if len(r.split(';')) >= 2])
                 
                 adicionados = 0
                 for n in reversed(novos):
                     fingerprint = f"{n[0]};{n[1]}"
-                    if fingerprint not in recentes_fingerprints:
-                        line = f"{n[0]};{n[1]};{n[2]}"
-                        existentes.insert(0, line)
-                        recentes_fingerprints.add(fingerprint)
+                    if fingerprint not in recientes_fingerprints:
+                        line = f"{n[0]};{n[1]}"
+                        dirigentes.insert(0, line)
+                        recientes_fingerprints.add(fingerprint)
                         adicionados += 1
-
                 # Otimização severa de ML: Só roda cálculos onerosos e reconstrução de base
                 # SE alguma informação inteiramente nova entrou no sistema!
                 if adicionados > 0:
                     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-                        for item in existentes[:MAX_REGISTROS]:
+                        for item in dirigentes[:MAX_REGISTROS]:
                             f.write(item + "\n")
 
-                    log(f"Adicionados: {adicionados}. Total: {len(existentes)}")
+                    log(f"Adicionados: {adicionados}. Total: {len(dirigentes)}")
 
                     # Executar Análise
                     df = load_data_for_analysis()
