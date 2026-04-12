@@ -419,10 +419,11 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
 
         mean_val = data_series.mean()
 
-        # Clamp: limita a previsão ao range razoável do histórico
-        # Evita extrapolações absurdas (ex: prever 4007x quando o P95 real é 30x)
-        p95 = float(np.percentile(data_series, 95))
-        upper_bound = max(p95 * 2.0, mean_val * 3.0)
+        # Clamp: limita previsao ao range razoavel do historico
+        # Usa mediana e P75 como referencia - resilientes a outliers extremos
+        median_val = float(np.median(data_series))
+        p75 = float(np.percentile(data_series, 75))
+        upper_bound = max(p75 * 2.0, median_val * 3.0, mean_val * 2.0)
         pred = float(np.clip(pred, 1.0, upper_bound))
 
         return pred, mean_val
@@ -527,15 +528,22 @@ def analyze_spikes(df_full, threshold, label):
     pred_gap = pred_gap_ml
     pred_gap_rounds = pred_gap_rounds_ml
 
-    # Predição ML Valor Extra (Estratégia similar de ML para saídas prováveis em pico)
+    # Predição ML Valor Extra
+    # Treina no espaco log para domesticar a distribuicao long-tail dos spikes
+    # Ex: [5, 6, 200, 8, 300] -> log -> [1.6, 1.8, 5.3, 2.1, 5.7] -> ML preve ~2.5 -> exp -> ~12x
     spike_values = spikes["value"]
-    pred_value_ml, mean_val_stat = predict_optimized(
-        spike_values.reset_index(drop=True), label + "_valor",
+    spike_values_log = np.log1p(spike_values).reset_index(drop=True)
+    pred_log, mean_log = predict_optimized(
+        spike_values_log, label + "_valor",
         spikes["timestamp"].reset_index(drop=True)
     )
-    # Clamp final de segurança: valor previsto nunca ultrapassa o maior spike já registrado
-    max_spike_real = float(spike_values.max())
-    pred_value = min(pred_value_ml, max_spike_real)
+    pred_value_ml = float(np.expm1(pred_log))  # Reverte log1p
+
+    # Clamp: valor previsto limitado ao P75 * 2 dos spikes reais (resiliente a outliers)
+    p75_spike = float(np.percentile(spike_values, 75))
+    median_spike = float(np.median(spike_values))
+    upper_val = max(p75_spike * 2.0, median_spike * 3.0)
+    pred_value = float(np.clip(pred_value_ml, threshold + 0.01, upper_val))
 
     last_spike = spikes["timestamp"].iloc[-1]
     predicted_next = last_spike + timedelta(seconds=pred_gap)
