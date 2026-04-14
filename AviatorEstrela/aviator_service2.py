@@ -1223,5 +1223,5 @@ def main_loop():
 
 if __name__ == "__main__":
     # Dashboard em Thread separada
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False), daemon=True).start()
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5005, debug=False, use_reloader=False), daemon=True).start()
     main_loop()
