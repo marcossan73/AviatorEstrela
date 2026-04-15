@@ -474,10 +474,20 @@ def _load_cached_models():
 latest_analysis = {}
 
 def analyze_spikes(df_full, threshold, label):
-    # ML RE-TRAIN LIMIT: Usa todo o log para exibir pro DB, 
-    # mas APENAS as últimas 1750 rodadas para treinamento do ML e cálculo de Gaps 
-    # para evitar obsolescência precoce (A roleta muda de padrão sazonalmente a cada dia/duas semanas).
-    df = df_full.tail(1750).copy()
+    # ML RE-TRAIN LIMIT: Janela proporcional à raridade do spike.
+    # Spikes raros precisam de mais histórico para gerar amostras suficientes ao ML.
+    # O peso exponencial (0.995^i) garante que dados antigos tenham influência mínima,
+    # então aumentar a janela é seguro contra obsolescência sazonal.
+    # >5x  (~1 a cada 5-7 rodadas)   → 1750 rodadas ≈ 250-350 gaps ✓
+    # >10x (~1 a cada 50-80 rodadas)  → 3000 rodadas ≈  40-60  gaps ✓ (ativa CV consistente)
+    # >50x (~1 a cada 200-300 rodadas)→ 5000 rodadas ≈  17-25  gaps ✓
+    if threshold >= 50:
+        train_window = 5000
+    elif threshold >= 10:
+        train_window = 3000
+    else:
+        train_window = 1750
+    df = df_full.tail(train_window).copy()
 
     spikes = df[df["value"] > threshold].copy()
     if len(spikes) < 3: return
