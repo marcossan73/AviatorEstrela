@@ -26,7 +26,7 @@ from aviator_service2 import (
     _MODEL_RETRAIN_INTERVALS, _model_cache, _safe_filename,
     load_data_for_analysis, analyze_spikes, analyze_trends,
     build_features, predict_optimized, latest_analysis,
-    THRESHOLD_5, THRESHOLD_10, THRESHOLD_50
+    THRESHOLD_5, THRESHOLD_10, THRESHOLD_50, THRESHOLD_100
 )
 
 SEPARATOR = "=" * 70
@@ -142,7 +142,7 @@ def diagnostico_dados():
     print("   P95: %.2fx" % np.percentile(df['value'], 95))
     print("   P99: %.2fx" % np.percentile(df['value'], 99))
 
-    for threshold, label in [(5.0, ">5x"), (10.0, ">10x"), (50.0, ">50x")]:
+    for threshold, label in [(5.0, ">5x"), (10.0, ">10x"), (50.0, ">50x"), (100.0, ">100x")]:
         spikes = df[df["value"] > threshold]
         print("\n   Spikes %s: %d ocorrencias (%.1f%%)" % (label, len(spikes), len(spikes) / len(df) * 100))
         if len(spikes) > 0:
@@ -322,7 +322,7 @@ def forcar_retreino(filtro=None):
 
     print("   Registros: %d" % len(df))
 
-    thresholds = [(THRESHOLD_5, ">5"), (THRESHOLD_10, ">10"), (THRESHOLD_50, ">50")]
+    thresholds = [(THRESHOLD_5, ">5"), (THRESHOLD_10, ">10"), (THRESHOLD_50, ">50"), (THRESHOLD_100, ">100")]
     for thresh, label in thresholds:
         if filtro and not label.startswith(filtro):
             continue

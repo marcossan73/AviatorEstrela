@@ -43,7 +43,7 @@ LOG_FILE         = os.path.join(BASE_DIR, "log_execucao.txt")
 PREDICTIONS_FILE = os.path.join(BASE_DIR, "predictions.txt")
 ACCURACY_LOG     = os.path.join(BASE_DIR, "accuracy_log.json")
 
-THRESHOLD_5, THRESHOLD_10, THRESHOLD_50 = 5.0, 10.0, 50.0
+THRESHOLD_5, THRESHOLD_10, THRESHOLD_50, THRESHOLD_100 = 5.0, 10.0, 50.0, 100.0
 WINDOW_SIZE = 5
 INTERVALO_SEGUNDOS = 10
 MAX_REGISTROS = 10000
@@ -217,6 +217,7 @@ _MODEL_RETRAIN_INTERVALS = {
     '>5': 40,        # Spikes frequentes — retreina a cada ~40 gaps
     '>10': 25,       # Spikes moderados — retreina a cada ~25 gaps
     '>50': 10,       # Spikes raros — retreina a cada ~10 gaps (era 50!)
+    '>100': 5,       # Spikes muito raros — retreina a cada ~5 gaps
 }
 _MODEL_MAX_AGE_SECONDS = 7200  # Modelo expira após 2 horas independentemente
 _MODEL_CV_MAE_DEGRADE_FACTOR = 1.5  # Retreina se CV MAE atual > 1.5x o CV MAE do treino
@@ -228,10 +229,11 @@ def _safe_filename(name):
     return name.replace('>', 'gt').replace('<', 'lt').replace(':', '_').replace('"', '_').replace('|', '_').replace('?', '_').replace('*', '_')
 
 
-def build_features(gaps: pd.Series, timestamps: pd.Series = None, forced_lag: int = None):
+def build_features(gaps: pd.Series, timestamps: pd.Series = None, forced_lag: int = None, is_value_model: bool = False):
     """
     Constrói features a partir de janela deslizante sobre os gaps.
     Se timestamps for fornecido, adiciona features cíclicas de hora e dia.
+    Se is_value_model=True, adiciona features específicas para predição de valores.
     """
     n = len(gaps)
     lag = forced_lag if forced_lag is not None else (5 if n > 15 else 3)
@@ -245,6 +247,19 @@ def build_features(gaps: pd.Series, timestamps: pd.Series = None, forced_lag: in
         feats.append(window.min())
         feats.append(window.max())
         feats.append(window.max() - window.min())  # Range
+
+        # Features adicionais para modelos de valor
+        if is_value_model:
+            feats.append(np.percentile(window, 75))  # P75
+            feats.append(np.percentile(window, 90))  # P90
+            feats.append(np.median(window))  # Mediana
+            feats.append(window.skew() if len(window) > 2 else 0)  # Assimetria
+            # Tendência recente (slope dos últimos 3 valores)
+            if len(window) >= 3:
+                recent_trend = np.polyfit(range(3), window.values[-3:], 1)[0]
+                feats.append(recent_trend)
+            else:
+                feats.append(0.0)
 
         # Features cíclicas de hora do dia e dia da semana
         if timestamps is not None and i < len(timestamps):
@@ -282,9 +297,12 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
         # Calcula lag UMA VEZ baseado em data_series e reutiliza em treino e previsão
         n = len(data_series)
         lag = 5 if n > 15 else 3
-        n_features = lag + 10  # lag values + 6 estatísticas + 4 cíclicas
 
-        X, y = build_features(data_series, spike_timestamps, forced_lag=lag)
+        # Detecta se é modelo de valor (tem "_valor" no label)
+        is_value_model = "_valor" in threshold_label
+        n_features = lag + 10 + (5 if is_value_model else 0)  # lag values + 6 base + 4 cíclicas + 5 extras para valor
+
+        X, y = build_features(data_series, spike_timestamps, forced_lag=lag, is_value_model=is_value_model)
         n_samples = len(X)
 
         if n_samples < 3:
@@ -342,18 +360,33 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
             # Peso exponencial — amostras recentes valem mais
             sample_weights = np.array([0.995 ** (n_samples - 1 - i) for i in range(n_samples)])
 
-            base_models = [
-                ('ridge', Ridge(alpha=1.0)),
-                ('rf', RandomForestRegressor(
-                    n_estimators=80, max_depth=6, min_samples_leaf=3, random_state=42
-                )),
-                ('gb', GradientBoostingRegressor(
-                    n_estimators=80, max_depth=4, learning_rate=0.05, random_state=42
-                ))
-            ]
-            model = StackingRegressor(
-                estimators=base_models, final_estimator=Ridge(alpha=0.5), cv=3
-            )
+            # Modelos mais robustos para predição de valor (especialmente para spikes altos)
+            if is_value_model:
+                base_models = [
+                    ('ridge', Ridge(alpha=0.5)),
+                    ('rf', RandomForestRegressor(
+                        n_estimators=120, max_depth=8, min_samples_leaf=2, random_state=42
+                    )),
+                    ('gb', GradientBoostingRegressor(
+                        n_estimators=120, max_depth=5, learning_rate=0.03, random_state=42
+                    ))
+                ]
+                model = StackingRegressor(
+                    estimators=base_models, final_estimator=Ridge(alpha=0.3), cv=3
+                )
+            else:
+                base_models = [
+                    ('ridge', Ridge(alpha=1.0)),
+                    ('rf', RandomForestRegressor(
+                        n_estimators=80, max_depth=6, min_samples_leaf=3, random_state=42
+                    )),
+                    ('gb', GradientBoostingRegressor(
+                        n_estimators=80, max_depth=4, learning_rate=0.05, random_state=42
+                    ))
+                ]
+                model = StackingRegressor(
+                    estimators=base_models, final_estimator=Ridge(alpha=0.5), cv=3
+                )
 
             # Cross-validate para medir confiança real
             cv_mae = None
@@ -361,9 +394,14 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
                 tscv = TimeSeriesSplit(n_splits=3)
                 scores = []
                 for train_idx, val_idx in tscv.split(X):
-                    model_temp = StackingRegressor(
-                        estimators=base_models, final_estimator=Ridge(alpha=0.5), cv=3
-                    )
+                    if is_value_model:
+                        model_temp = StackingRegressor(
+                            estimators=base_models, final_estimator=Ridge(alpha=0.3), cv=3
+                        )
+                    else:
+                        model_temp = StackingRegressor(
+                            estimators=base_models, final_estimator=Ridge(alpha=0.5), cv=3
+                        )
                     model_temp.fit(X_s[train_idx], y[train_idx],
                                    sample_weight=sample_weights[train_idx])
                     pred_val = model_temp.predict(X_s[val_idx])
@@ -405,6 +443,18 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
         feats.append(future_window.max())
         feats.append(future_window.max() - future_window.min())
 
+        # Features adicionais para modelos de valor
+        if is_value_model:
+            feats.append(np.percentile(future_window, 75))
+            feats.append(np.percentile(future_window, 90))
+            feats.append(np.median(future_window))
+            feats.append(future_window.skew() if len(future_window) > 2 else 0)
+            if len(future_window) >= 3:
+                recent_trend = np.polyfit(range(3), future_window.values[-3:], 1)[0]
+                feats.append(recent_trend)
+            else:
+                feats.append(0.0)
+
         # Features cíclicas para o instante da previsão (agora)
         now = datetime.now()
         hour = now.hour + now.minute / 60.0
@@ -420,10 +470,18 @@ def predict_optimized(data_series, threshold_label, spike_timestamps=None):
         mean_val = data_series.mean()
 
         # Clamp: limita previsao ao range razoavel do historico
-        # Usa mediana e P75 como referencia - resilientes a outliers extremos
+        # Para modelos de valor, usa limites mais permissivos para permitir predição de spikes altos
         median_val = float(np.median(data_series))
         p75 = float(np.percentile(data_series, 75))
-        upper_bound = max(p75 * 2.0, median_val * 3.0, mean_val * 2.0)
+        p90 = float(np.percentile(data_series, 90))
+        max_val = float(data_series.max())
+
+        if is_value_model:
+            # Limites mais relaxados para predição de valores
+            upper_bound = max(p90 * 2.5, p75 * 3.5, max_val * 1.5, median_val * 5.0)
+        else:
+            upper_bound = max(p75 * 2.0, median_val * 3.0, mean_val * 2.0)
+
         pred = float(np.clip(pred, 1.0, upper_bound))
 
         return pred, mean_val
@@ -481,11 +539,15 @@ def analyze_spikes(df_full, threshold, label):
     # >5x  (~1 a cada 5-7 rodadas)   → 1750 rodadas ≈ 250-350 gaps ✓
     # >10x (~1 a cada 50-80 rodadas)  → 3000 rodadas ≈  40-60  gaps ✓ (ativa CV consistente)
     # >50x (~1 a cada 200-300 rodadas)→ 5000 rodadas ≈  17-25  gaps ✓
-    if threshold >= 50:
+    # >100x (~1 a cada 500+ rodadas)  → 7500 rodadas ≈  10-15  gaps ✓ (muito raro, máximo histórico)
+    if threshold >= 100:
+        train_window = 7500
+    elif threshold >= 50:
         train_window = 5000
     elif threshold >= 10:
         train_window = 3000
     else:
+        train_window = 1750
         train_window = 1750
     df = df_full.tail(train_window).copy()
 
@@ -549,10 +611,18 @@ def analyze_spikes(df_full, threshold, label):
     )
     pred_value_ml = float(np.expm1(pred_log))  # Reverte log1p
 
-    # Clamp: valor previsto limitado ao P75 * 2 dos spikes reais (resiliente a outliers)
+    # Clamp: valor previsto com limites mais permissivos para capturar spikes altos
     p75_spike = float(np.percentile(spike_values, 75))
+    p90_spike = float(np.percentile(spike_values, 90))
     median_spike = float(np.median(spike_values))
-    upper_val = max(p75_spike * 2.0, median_spike * 3.0)
+    max_spike = float(spike_values.max())
+
+    # Limites mais relaxados especialmente para thresholds altos (>50)
+    if threshold >= 50:
+        upper_val = max(p90_spike * 3.0, p75_spike * 4.0, max_spike * 1.8, median_spike * 6.0)
+    else:
+        upper_val = max(p90_spike * 2.0, p75_spike * 3.0, max_spike * 1.5, median_spike * 4.0)
+
     pred_value = float(np.clip(pred_value_ml, threshold + 0.01, upper_val))
 
     last_spike = spikes["timestamp"].iloc[-1]
@@ -579,7 +649,8 @@ def analyze_spikes(df_full, threshold, label):
             'c2':  len(last_100_df[last_100_df['value'] >= 2]),
             'c5':  len(last_100_df[last_100_df['value'] >= 5]),
             'c10': len(last_100_df[last_100_df['value'] >= 10]),
-            'c50': len(last_100_df[last_100_df['value'] >= 50])
+            'c50': len(last_100_df[last_100_df['value'] >= 50]),
+            'c100': len(last_100_df[last_100_df['value'] >= 100])
         }
 
         # Aumenta o buffer de histórico para a função 'carregar mais'
@@ -896,7 +967,8 @@ def dashboard():
                         <span style="color:#6f42c1;font-weight:bold;">>2:</span> {{ data.counts_100.c2 if data.counts_100 else 0 }} | 
                         <span style="color:#28a745;font-weight:bold;">>5:</span> {{ data.counts_100.c5 if data.counts_100 else 0 }} | 
                         <span style="color:#e83e8c;font-weight:bold;">>10:</span> {{ data.counts_100.c10 if data.counts_100 else 0 }} | 
-                        <span style="color:#007bff;font-weight:bold;">>50:</span> {{ data.counts_100.c50 if data.counts_100 else 0 }}
+                        <span style="color:#007bff;font-weight:bold;">>50:</span> {{ data.counts_100.c50 if data.counts_100 else 0 }} | 
+                        <span style="color:#dc3545;font-weight:bold;">>100:</span> {{ data.counts_100.c100 if data.counts_100 else 0 }}
                     </div>
                     <p style="font-size:12px;text-align:center;color:#666;margin-top:10px;">Período: {{ data.periodo }}</p>
                 </div>
@@ -947,7 +1019,7 @@ def dashboard():
                 </div>
 
                 <div class="grid-3">
-                    {% for k in ['spikes_5', 'spikes_10', 'spikes_50'] %}
+                    {% for k in ['spikes_5', 'spikes_10', 'spikes_50', 'spikes_100'] %}
                     <div class="card">
                         <h3>Spikes {{ k.replace('spikes_', '> ') }}</h3>
                         {% if k in data and data[k] %}
@@ -1223,6 +1295,7 @@ def main_loop():
                         analyze_spikes(df, THRESHOLD_5, ">5")
                         analyze_spikes(df, THRESHOLD_10, ">10")
                         analyze_spikes(df, THRESHOLD_50, ">50")
+                        analyze_spikes(df, THRESHOLD_100, ">100")
                         analyze_trends(df)
 
             time.sleep(INTERVALO_SEGUNDOS)

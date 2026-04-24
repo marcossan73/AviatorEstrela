@@ -30,8 +30,10 @@
     <Compile Include="_test_analyzer.py" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="GUIA_RAPIDO.md" />
     <Content Include="instalar_linux.sh" />
     <Content Include="instalar_windows.bat" />
+    <Content Include="MELHORIAS_ML.md" />
     <Content Include="predictions - Copy.txt" />
     <Content Include="README.md" />
     <Content Include="requirements.txt" />
