@@ -30,9 +30,13 @@
     <Compile Include="_test_analyzer.py" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="diagnostico_chrome.sh" />
     <Content Include="GUIA_RAPIDO.md" />
+    <Content Include="iniciar_com_xvfb.sh" />
+    <Content Include="instalar_chrome_forcado.sh" />
     <Content Include="instalar_linux.sh" />
     <Content Include="instalar_windows.bat" />
+    <Content Include="INSTRUCOES_CHROME.md" />
     <Content Include="MELHORIAS_ML.md" />
     <Content Include="predictions - Copy.txt" />
     <Content Include="README.md" />
