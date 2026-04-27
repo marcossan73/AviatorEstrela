@@ -70,7 +70,7 @@ echo -e "   ${GREEN}OK: $PY_FULL ($PYTHON_CMD)${NC}"
 # 2. Verificar/Instalar Google Chrome
 # -------------------------------------------------
 echo ""
-echo -e "[2/6] Verificando Google Chrome..."
+echo -e "[2/7] Verificando Google Chrome..."
 
 if command -v google-chrome &>/dev/null || command -v google-chrome-stable &>/dev/null; then
     CHROME_VER=$(google-chrome --version 2>/dev/null || google-chrome-stable --version 2>/dev/null)
@@ -89,18 +89,74 @@ else
 fi
 
 # -------------------------------------------------
-# 3. Dependencias do sistema
+# 3. Verificar/Instalar ChromeDriver
 # -------------------------------------------------
 echo ""
-echo -e "[3/6] Instalando dependencias do sistema..."
-sudo apt-get install -y -qq python3-pip python3-venv build-essential libffi-dev wget 2>/dev/null || true
+echo -e "[3/7] Verificando ChromeDriver..."
+
+if command -v chromedriver &>/dev/null; then
+    DRIVER_VER=$(chromedriver --version 2>/dev/null)
+    echo -e "   ${GREEN}OK: $DRIVER_VER${NC}"
+else
+    echo -e "   ${YELLOW}ChromeDriver nao encontrado. Instalando...${NC}"
+
+    # Obter versão do Chrome
+    CHROME_VERSION=$(google-chrome --version 2>/dev/null || google-chrome-stable --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)
+    CHROME_MAJOR=$(echo "$CHROME_VERSION" | cut -d. -f1)
+
+    cd /tmp
+
+    # Para Chrome 115+, usar Chrome for Testing
+    if [ "$CHROME_MAJOR" -ge 115 ]; then
+        echo "   Baixando ChromeDriver $CHROME_VERSION..."
+        DRIVER_URL="https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROME_VERSION}/linux64/chromedriver-linux64.zip"
+
+        if wget -q "$DRIVER_URL"; then
+            unzip -q chromedriver-linux64.zip 2>/dev/null
+            sudo mv chromedriver-linux64/chromedriver /usr/local/bin/ 2>/dev/null || true
+            sudo chmod +x /usr/local/bin/chromedriver 2>/dev/null || true
+            rm -rf chromedriver-linux64* 2>/dev/null || true
+        else
+            # Fallback: usar versão genérica recente
+            echo "   Versão específica não encontrada. Usando versão 120..."
+            wget -q https://storage.googleapis.com/chrome-for-testing-public/120.0.6099.109/linux64/chromedriver-linux64.zip
+            unzip -q chromedriver-linux64.zip 2>/dev/null
+            sudo mv chromedriver-linux64/chromedriver /usr/local/bin/ 2>/dev/null || true
+            sudo chmod +x /usr/local/bin/chromedriver 2>/dev/null || true
+            rm -rf chromedriver-linux64* 2>/dev/null || true
+        fi
+    else
+        echo "   Baixando ChromeDriver para Chrome <115..."
+        DRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR}")
+        wget -q "https://chromedriver.storage.googleapis.com/${DRIVER_VERSION}/chromedriver_linux64.zip"
+        unzip -q chromedriver_linux64.zip 2>/dev/null
+        sudo mv chromedriver /usr/local/bin/ 2>/dev/null || true
+        sudo chmod +x /usr/local/bin/chromedriver 2>/dev/null || true
+        rm -f chromedriver_linux64.zip 2>/dev/null || true
+    fi
+
+    cd "$SCRIPT_DIR"
+
+    if command -v chromedriver &>/dev/null; then
+        echo -e "   ${GREEN}OK: ChromeDriver instalado.${NC}"
+    else
+        echo -e "   ${YELLOW}AVISO: Falha ao instalar ChromeDriver. O Selenium tentará gerenciar automaticamente.${NC}"
+    fi
+fi
+
+# -------------------------------------------------
+# 4. Dependencias do sistema
+# -------------------------------------------------
+echo ""
+echo -e "[4/7] Instalando dependencias do sistema..."
+sudo apt-get install -y -qq python3-pip python3-venv build-essential libffi-dev wget unzip curl 2>/dev/null || true
 echo -e "   ${GREEN}OK${NC}"
 
 # -------------------------------------------------
-# 4. Criar ambiente virtual e instalar pacotes Python
+# 5. Criar ambiente virtual e instalar pacotes Python
 # -------------------------------------------------
 echo ""
-echo -e "[4/6] Criando ambiente virtual e instalando dependencias Python..."
+echo -e "[5/7] Criando ambiente virtual e instalando dependencias Python..."
 
 VENV_DIR="$SCRIPT_DIR/venv"
 
@@ -130,10 +186,10 @@ fi
 echo -e "   ${GREEN}OK: Dependencias instaladas.${NC}"
 
 # -------------------------------------------------
-# 5. Criar modulo de compatibilidade (winsound)
+# 6. Criar modulo de compatibilidade (winsound)
 # -------------------------------------------------
 echo ""
-echo -e "[5/6] Criando compatibilidade cross-platform..."
+echo -e "[6/7] Criando compatibilidade cross-platform..."
 
 # Detecta pasta do servico
 SVC_DIR="$SCRIPT_DIR"
@@ -184,10 +240,10 @@ fi
 echo -e "   ${GREEN}OK${NC}"
 
 # -------------------------------------------------
-# 6. Criar scripts de execucao
+# 7. Criar scripts de execucao
 # -------------------------------------------------
 echo ""
-echo -e "[6/6] Criando scripts de execucao..."
+echo -e "[7/7] Criando scripts de execucao..."
 
 # iniciar.sh
 cat > "$SCRIPT_DIR/iniciar.sh" << SHEOF

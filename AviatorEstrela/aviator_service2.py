@@ -116,17 +116,41 @@ def log(msg):
         f.write(linha + "\n")
 
 def iniciar_driver():
+    log("Iniciando driver Chrome (modo headless)...")
     options = Options()
     options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--log-level=3")  # Oculta mensagens não-críticas
-    options.add_experimental_option('excludeSwitches', ['enable-logging']) # Desabilita devtools port warning e info messages de GCM
+    options.add_argument("--log-level=3")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
+    options.add_experimental_option("useAutomationExtension", False)
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
-    
-    # Reparo do erro OSError: [WinError 193]
-    # O driver baixado no cache da biblioteca ChromeDriverManager corrompeu.
-    # O Selenium (a partir da v4.6+) gerencia automaticamente o ChromeDriver sem precisar dele.
+
+    # Detecção automática do Chrome em caminhos comuns (Linux/Windows)
+    chrome_paths = [
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/snap/bin/chromium',
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+    ]
+
+    for path in chrome_paths:
+        if os.path.exists(path):
+            options.binary_location = path
+            log(f"Chrome encontrado em: {path}")
+            break
+    else:
+        log("Chrome não encontrado em caminhos padrão. Tentando detecção automática do Selenium...")
+
+    # O Selenium (a partir da v4.6+) gerencia automaticamente o ChromeDriver
     driver = webdriver.Chrome(options=options)
+    driver.set_page_load_timeout(30)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
 

@@ -38,6 +38,8 @@
     <Content Include="README.md" />
     <Content Include="requirements.txt" />
     <Content Include="resultados_aviator - Copy.txt" />
+    <Content Include="solucao_chrome.sh" />
+    <Content Include="SOLUCAO_CHROME_LINUX.md" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
