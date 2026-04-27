@@ -1,6 +1,6 @@
 #!/bin/bash
 # Instalação e uso do webdriver-manager para gerenciar ChromeDriver automaticamente
-
+#
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

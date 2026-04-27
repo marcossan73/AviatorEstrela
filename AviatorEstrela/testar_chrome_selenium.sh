@@ -19,7 +19,7 @@ python3 << 'EOF'
 import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-
+#
 print("  Configurando opcoes...")
 options = Options()
 options.add_argument("--headless")

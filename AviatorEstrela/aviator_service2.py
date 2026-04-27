@@ -140,7 +140,7 @@ def iniciar_driver():
 
     # Detecção automática do Chrome em caminhos comuns (Linux/Windows)
     chrome_paths = [
-        '/usr/bin/google-chrome-stable',
+        #'/usr/bin/google-chrome-stable',
         '/usr/bin/google-chrome',
         '/usr/bin/chromium-browser',
         '/usr/bin/chromium',
