@@ -24,15 +24,18 @@
   <ItemGroup>
     <Compile Include="AviatorEstrela.py" />
     <Compile Include="AviatorService.py" />
+    <Compile Include="aviator_service2.py" />
     <Compile Include="ml_diagnostico.py" />
     <Compile Include="test_ml.py" />
     <Compile Include="_platform_compat.py" />
     <Compile Include="_test_analyzer.py" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="CHROME_PRONTO.md" />
     <Content Include="diagnostico_chrome.sh" />
     <Content Include="GUIA_RAPIDO.md" />
     <Content Include="iniciar_com_xvfb.sh" />
+    <Content Include="iniciar_garantido.sh" />
     <Content Include="instalar_chrome_forcado.sh" />
     <Content Include="instalar_linux.sh" />
     <Content Include="instalar_windows.bat" />
@@ -44,6 +47,9 @@
     <Content Include="resultados_aviator - Copy.txt" />
     <Content Include="solucao_chrome.sh" />
     <Content Include="SOLUCAO_CHROME_LINUX.md" />
+    <Content Include="testar_chrome_selenium.sh" />
+    <Content Include="usar_webdriver_manager.sh" />
+    <Content Include="WEBDRIVER_MANAGER.md" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # =============================================================================
 #  AviatorService.py  —  Versão STACKED REGIME DETECTOR (Final)
 #  Melhorias: Detecção de estados de 'Seca', Ensemble de ML (GBM/Ridge),
@@ -29,6 +30,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+
+# Webdriver Manager (opcional - gerencia ChromeDriver automaticamente)
+try:
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+    USE_WEBDRIVER_MANAGER = True
+except ImportError:
+    USE_WEBDRIVER_MANAGER = False
 
 # ---------------------------------------------------------------------------
 # Configurações e Caminhos
@@ -148,8 +157,20 @@ def iniciar_driver():
     else:
         log("Chrome não encontrado em caminhos padrão. Tentando detecção automática do Selenium...")
 
-    # O Selenium (a partir da v4.6+) gerencia automaticamente o ChromeDriver
-    driver = webdriver.Chrome(options=options)
+    # Usar webdriver-manager se disponível (gerencia ChromeDriver automaticamente)
+    if USE_WEBDRIVER_MANAGER:
+        try:
+            log("Usando webdriver-manager para gerenciar ChromeDriver...")
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+            log("ChromeDriver gerenciado automaticamente pelo webdriver-manager")
+        except Exception as e:
+            log(f"Webdriver-manager falhou ({e}), usando método padrão...")
+            driver = webdriver.Chrome(options=options)
+    else:
+        # Método padrão: Selenium gerencia o ChromeDriver (v4.6+)
+        driver = webdriver.Chrome(options=options)
+
     driver.set_page_load_timeout(30)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
