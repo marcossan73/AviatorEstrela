@@ -32,21 +32,32 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="CHROME_PRONTO.md" />
+    <Content Include="criar_servico_systemd.sh" />
+    <Content Include="detectar_chrome_real.sh" />
     <Content Include="diagnostico_chrome.sh" />
     <Content Include="GUIA_RAPIDO.md" />
+    <Content Include="iniciar_background.sh" />
     <Content Include="iniciar_com_xvfb.sh" />
     <Content Include="iniciar_garantido.sh" />
+    <Content Include="iniciar_screen.sh" />
+    <Content Include="instalacao_automatica.sh" />
+    <Content Include="instalar_chrome_apt.sh" />
     <Content Include="instalar_chrome_forcado.sh" />
     <Content Include="instalar_linux.sh" />
     <Content Include="instalar_windows.bat" />
     <Content Include="INSTRUCOES_CHROME.md" />
     <Content Include="MELHORIAS_ML.md" />
+    <Content Include="parar.sh" />
+    <Content Include="parar_screen.sh" />
     <Content Include="predictions - Copy.txt" />
     <Content Include="README.md" />
+    <Content Include="README_INSTALACAO.md" />
     <Content Include="requirements.txt" />
     <Content Include="resultados_aviator - Copy.txt" />
     <Content Include="solucao_chrome.sh" />
     <Content Include="SOLUCAO_CHROME_LINUX.md" />
+    <Content Include="SOLUCAO_SNAP_APT.md" />
+    <Content Include="status.sh" />
     <Content Include="testar_chrome_selenium.sh" />
     <Content Include="usar_webdriver_manager.sh" />
     <Content Include="WEBDRIVER_MANAGER.md" />
