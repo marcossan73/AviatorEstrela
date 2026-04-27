@@ -1,6 +1,6 @@
 #!/bin/bash
 # Instalação e uso do webdriver-manager para gerenciar ChromeDriver automaticamente
-#
+# Este script instala o webdriver-manager, testa se ele funciona e atualiza aviator_service2.py para usar o webdriver-manager
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
