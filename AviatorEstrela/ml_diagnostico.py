@@ -18,6 +18,20 @@ import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+import pytz
+
+# Configuração de fuso horário - Horário de Brasília
+TIMEZONE_BRT = pytz.timezone('America/Sao_Paulo')
+
+def agora_brasilia():
+    """Retorna datetime atual no horário de Brasília."""
+    return datetime.now(TIMEZONE_BRT)
+
+def converter_para_brasilia(dt):
+    """Converte datetime para horário de Brasília."""
+    if dt.tzinfo is None:
+        dt = pytz.UTC.localize(dt)
+    return dt.astimezone(TIMEZONE_BRT)
 
 # Importa funcoes do servico principal
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,8 +48,10 @@ HIST_FILE = os.path.join(BASE_DIR, "ml_history.json")
 
 
 def fmt_ts(unix_ts):
-    """Converte unix timestamp para string legivel."""
-    return datetime.fromtimestamp(unix_ts).strftime("%d/%m/%Y %H:%M:%S")
+    """Converte unix timestamp para string legivel em horário de Brasília."""
+    dt_utc = datetime.fromtimestamp(unix_ts, tz=pytz.UTC)
+    dt_brt = converter_para_brasilia(dt_utc)
+    return dt_brt.strftime("%d/%m/%Y %H:%M:%S %Z")
 
 
 def fmt_age(unix_ts):

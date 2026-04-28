@@ -15,7 +15,22 @@ import winsound
 import numpy as np
 import pandas as pd
 from datetime import date, datetime, timedelta
+import pytz  # Biblioteca para fuso horário
 from flask import Flask, render_template_string, request
+
+# Configuração de fuso horário - Horário de Brasília (BRT/BRST)
+TIMEZONE_BRT = pytz.timezone('America/Sao_Paulo')
+
+def agora_brasilia():
+    """Retorna datetime atual no horário de Brasília."""
+    return datetime.now(TIMEZONE_BRT)
+
+def converter_para_brasilia(dt):
+    """Converte datetime para horário de Brasília."""
+    if dt.tzinfo is None:
+        # Se não tem timezone, assume UTC e converte
+        dt = pytz.UTC.localize(dt)
+    return dt.astimezone(TIMEZONE_BRT)
 
 # ML & Preprocessing
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, StackingRegressor
@@ -118,7 +133,8 @@ class RegimeDetector:
 # Funções de Log e Driver
 # ---------------------------------------------------------------------------
 def log(msg):
-    agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    """Registra mensagem com timestamp no horário de Brasília."""
+    agora = agora_brasilia().strftime("%d/%m/%Y %H:%M:%S %Z")
     linha = f"[{agora}] {msg}"
     print(linha)
     with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -200,7 +216,8 @@ def capturar_ultimos(driver):
         driver.get(f"{LOGIN_URL}?t={int(time.time()*1000)}&limit=50&subject=filter&isLoadMore=true")
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".cell__result")))
 
-        now = datetime.now()
+        # Usar horário de Brasília para comparações
+        now = agora_brasilia()
         hoje_str = now.strftime("%d/%m/%Y")
         ontem_str = (now - timedelta(days=1)).strftime("%d/%m/%Y")
         novos = []
@@ -236,11 +253,12 @@ def capturar_ultimos(driver):
             hora = item.get("hora")
 
             try:
-                dt_tentativa = datetime.strptime(f"{hoje_str} {hora}", "%d/%m/%Y %H:%M:%S")
+                # Parse com timezone de Brasília
+                dt_tentativa = TIMEZONE_BRT.localize(datetime.strptime(f"{hoje_str} {hora}", "%d/%m/%Y %H:%M:%S"))
                 # Se o horário do chute no site for por exemplo 23:59 e agora for 00:01
                 # o dt_tentativa cai no 'hoje' as 23:59 (Quase 24h no futuro)
                 data_correta = ontem_str if dt_tentativa > now + timedelta(minutes=5) else hoje_str
-                ts = datetime.strptime(f"{data_correta} {hora}", "%d/%m/%Y %H:%M:%S")
+                ts = TIMEZONE_BRT.localize(datetime.strptime(f"{data_correta} {hora}", "%d/%m/%Y %H:%M:%S"))
                 novos.append((val, ts.timestamp()))
             except:
                 continue
@@ -787,9 +805,10 @@ def analyze_spikes(df_full, threshold, label):
 
             # Usa timestamps completos (ISO) quando disponíveis, senão fallback HH:MM:SS
             if 'spike_ts' in real_entry and 'window_start_ts' in pred_entry:
-                rs_t = datetime.strptime(real_entry['spike_ts'], '%Y-%m-%d %H:%M:%S')
-                s_t = datetime.strptime(pred_entry['window_start_ts'], '%Y-%m-%d %H:%M:%S')
-                e_t = datetime.strptime(pred_entry['window_end_ts'], '%Y-%m-%d %H:%M:%S')
+                # Parse timestamps com timezone de Brasília
+                rs_t = TIMEZONE_BRT.localize(datetime.strptime(real_entry['spike_ts'], '%Y-%m-%d %H:%M:%S'))
+                s_t = TIMEZONE_BRT.localize(datetime.strptime(pred_entry['window_start_ts'], '%Y-%m-%d %H:%M:%S'))
+                e_t = TIMEZONE_BRT.localize(datetime.strptime(pred_entry['window_end_ts'], '%Y-%m-%d %H:%M:%S'))
             else:
                 # Fallback legado (entradas antigas sem _ts)
                 real_spike_str = real_entry.get('spike_time', '')
@@ -896,8 +915,9 @@ def analyze_trends(df_full):
             })
 
 def save_prediction(thresh, nxt, erl, lte):
+    """Salva predição com timestamp em horário de Brasília."""
     with open(PREDICTIONS_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now()};{thresh};{nxt};{erl};{lte};pendente\n")
+        f.write(f"{agora_brasilia().strftime('%Y-%m-%d %H:%M:%S')};{thresh};{nxt};{erl};{lte};pendente\n")
 
 def load_data_for_analysis():
     if not os.path.exists(OUTPUT_FILE): return pd.DataFrame()
@@ -906,9 +926,9 @@ def load_data_for_analysis():
     # Lendo o arquivo do mais novo pro mais antigo
     with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
         linhas = [line.strip() for line in f if line.strip()]
-        
-    now = datetime.now();
-    
+
+    now = agora_brasilia()
+
     new_lines = []
     for line in linhas:
         p = line.split(";")
@@ -917,7 +937,9 @@ def load_data_for_analysis():
                 val = float(p[0].replace(",", "."))
                 if len(p) == 2:
                     # New format: value;timestamp
-                    ts = datetime.fromtimestamp(float(p[1]))
+                    # Converter timestamp UTC para Brasília
+                    ts_utc = datetime.fromtimestamp(float(p[1]), tz=pytz.UTC)
+                    ts = converter_para_brasilia(ts_utc).replace(tzinfo=None)
                     new_lines.append(line)  # already new
                 elif len(p) == 3:
                     # Old format: value;hora;data

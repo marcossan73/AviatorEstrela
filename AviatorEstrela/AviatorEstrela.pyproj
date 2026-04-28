@@ -44,6 +44,7 @@
     <Content Include="instalar_chrome_apt.sh" />
     <Content Include="instalar_chrome_forcado.sh" />
     <Content Include="instalar_linux.sh" />
+    <Content Include="instalar_pytz.sh" />
     <Content Include="instalar_windows.bat" />
     <Content Include="INSTRUCOES_CHROME.md" />
     <Content Include="MELHORIAS_ML.md" />
@@ -59,6 +60,7 @@
     <Content Include="SOLUCAO_SNAP_APT.md" />
     <Content Include="status.sh" />
     <Content Include="testar_chrome_selenium.sh" />
+    <Content Include="TIMEZONE_BRASILIA.md" />
     <Content Include="usar_webdriver_manager.sh" />
     <Content Include="WEBDRIVER_MANAGER.md" />
   </ItemGroup>
