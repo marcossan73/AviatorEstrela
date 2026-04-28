@@ -32,6 +32,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="CHROME_PRONTO.md" />
+    <Content Include="CORRECAO_ORDENACAO.md" />
     <Content Include="criar_servico_systemd.sh" />
     <Content Include="detectar_chrome_real.sh" />
     <Content Include="diagnostico_chrome.sh" />
@@ -60,6 +61,7 @@
     <Content Include="SOLUCAO_SNAP_APT.md" />
     <Content Include="status.sh" />
     <Content Include="testar_chrome_selenium.sh" />
+    <Content Include="testar_ordenacao.sh" />
     <Content Include="TIMEZONE_BRASILIA.md" />
     <Content Include="usar_webdriver_manager.sh" />
     <Content Include="WEBDRIVER_MANAGER.md" />

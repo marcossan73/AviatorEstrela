@@ -701,7 +701,7 @@ def analyze_spikes(df_full, threshold, label):
 
     # Injeção dos dados globais
     if len(df_full) > 0:
-        latest_analysis['now'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        latest_analysis['now'] = agora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
         latest_analysis['ultimo'] = f"{df_full['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')} - {df_full['value'].iloc[-1]:.2f}x"
         latest_analysis['total_registros'] = len(df_full)
         latest_analysis['periodo'] = f"{df_full['timestamp'].iloc[0].strftime('%d/%m/%Y %H:%M:%S')} -> {df_full['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')}"
@@ -768,7 +768,7 @@ def analyze_spikes(df_full, threshold, label):
     # Store the prediction in history, unique per last_spike (deduplicação por timestamp completo)
     if not any(h.get('spike_ts', h.get('spike_time')) == last_spike_iso for h in old_history):
         old_history.insert(0, {
-            'prev_time': datetime.now().strftime('%H:%M:%S'),
+            'prev_time': agora_brasilia().strftime('%H:%M:%S'),
             'spike_time': last_spike_str,
             'spike_ts': last_spike_iso,
             'next': predicted_next.strftime('%H:%M:%S'),
@@ -922,7 +922,7 @@ def save_prediction(thresh, nxt, erl, lte):
 def load_data_for_analysis():
     if not os.path.exists(OUTPUT_FILE): return pd.DataFrame()
     data = []
-    
+
     # Lendo o arquivo do mais novo pro mais antigo
     with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
         linhas = [line.strip() for line in f if line.strip()]
@@ -937,39 +937,42 @@ def load_data_for_analysis():
                 val = float(p[0].replace(",", "."))
                 if len(p) == 2:
                     # New format: value;timestamp
-                    # Converter timestamp UTC para Brasília
+                    # Converter timestamp UTC para Brasília (manter como naive datetime para compatibilidade)
                     ts_utc = datetime.fromtimestamp(float(p[1]), tz=pytz.UTC)
-                    ts = converter_para_brasilia(ts_utc).replace(tzinfo=None)
+                    ts_brt = converter_para_brasilia(ts_utc)
+                    ts = ts_brt.replace(tzinfo=None)  # Remove timezone mas mantém hora BRT
                     new_lines.append(line)  # already new
                 elif len(p) == 3:
                     # Old format: value;hora;data
                     ts = datetime.strptime(f"{p[2]} {p[1]}", "%d/%m/%Y %H:%M:%S")
                     # Correção Dinâmica de Timestamp Retroativo
-                    if ts > now + timedelta(minutes=5):
+                    now_naive = now.replace(tzinfo=None)
+                    if ts > now_naive + timedelta(minutes=5):
                         ts -= timedelta(days=1)
                     new_lines.append(f"{p[0]};{ts.timestamp()}")
                 else:
                     continue
                 data.append({"value": val, "timestamp": ts})
             except: continue
-    
+
     # Convert the file if any old format
     if new_lines and new_lines != linhas:
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             for nl in new_lines:
                 f.write(nl + "\n")
-    
+
     if not data: return pd.DataFrame()
 
     # data está com os mais novos no topo
     df = pd.DataFrame(data)
 
-    # Ordena perfeitamente pela Data e Hora consertada do mais antigo (esquerda) pro mais presente (direita)
+    # Ordena perfeitamente pela Data e Hora do mais antigo (esquerda) pro mais presente (direita)
     df = df.sort_values(by="timestamp", ascending=True).reset_index(drop=True)
 
     # Deduplicação: remove linhas com mesmo valor e timestamp (tolerância de 1s)
-    df["_ts_round"] = df["timestamp"].dt.round("1s")
-    df = df.drop_duplicates(subset=["value", "_ts_round"], keep="first").drop(columns=["_ts_round"]).reset_index(drop=True)
+    # Converte timestamp para segundos para comparação
+    df["_ts_seconds"] = df["timestamp"].apply(lambda x: int(x.timestamp()))
+    df = df.drop_duplicates(subset=["value", "_ts_seconds"], keep="first").drop(columns=["_ts_seconds"]).reset_index(drop=True)
 
     return df
 
