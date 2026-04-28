@@ -24,6 +24,8 @@ import joblib
 
 import threading
 
+import _platform_compat  # stub silencioso do winsound no Linux
+
 import winsound
 
 import numpy as np
@@ -1420,11 +1422,16 @@ def analyze_spikes(df_full, threshold, label):
 
         latest_analysis['now'] = agora_brasilia().strftime("%d/%m/%Y %H:%M:%S")
 
-        latest_analysis['ultimo'] = f"{df_full['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')} - {df_full['value'].iloc[-1]:.2f}x"
+        def _fmt_ts(ts):
+            if hasattr(ts, 'tzinfo') and ts.tzinfo:
+                return ts.astimezone(TIMEZONE_BRT).strftime('%d/%m/%Y %H:%M:%S')
+            return TIMEZONE_BRT.localize(ts).strftime('%d/%m/%Y %H:%M:%S')
+
+        latest_analysis['ultimo'] = f"{_fmt_ts(df_full['timestamp'].iloc[-1])} - {df_full['value'].iloc[-1]:.2f}x"
 
         latest_analysis['total_registros'] = len(df_full)
 
-        latest_analysis['periodo'] = f"{df_full['timestamp'].iloc[0].strftime('%d/%m/%Y %H:%M:%S')} -> {df_full['timestamp'].iloc[-1].strftime('%d/%m/%Y %H:%M:%S')}"
+        latest_analysis['periodo'] = f"{_fmt_ts(df_full['timestamp'].iloc[0])} -> {_fmt_ts(df_full['timestamp'].iloc[-1])}"
 
 
 
@@ -1896,13 +1903,11 @@ def load_data_for_analysis():
 
                     # New format: value;timestamp
 
-                    # Converter timestamp UTC para Braslia (manter como naive datetime para compatibilidade)
+                    # Converte Unix timestamp para aware BRT - .timestamp() correto em Linux UTC e Windows
 
                     ts_utc = datetime.fromtimestamp(float(p[1]), tz=pytz.UTC)
 
-                    ts_brt = converter_para_brasilia(ts_utc)
-
-                    ts = ts_brt.replace(tzinfo=None)  # Remove timezone mas mantm hora BRT
+                    ts = converter_para_brasilia(ts_utc)  # aware BRT
 
                     new_lines.append(line)  # already new
 
@@ -1910,15 +1915,15 @@ def load_data_for_analysis():
 
                     # Old format: value;hora;data
 
-                    ts = datetime.strptime(f"{p[2]} {p[1]}", "%d/%m/%Y %H:%M:%S")
+                    ts_naive = datetime.strptime(f"{p[2]} {p[1]}", "%d/%m/%Y %H:%M:%S")
 
                     # Correo Dinmica de Timestamp Retroativo
 
-                    now_naive = now.replace(tzinfo=None)
+                    if ts_naive > now.replace(tzinfo=None) + timedelta(minutes=5):
 
-                    if ts > now_naive + timedelta(minutes=5):
+                        ts_naive -= timedelta(days=1)
 
-                        ts -= timedelta(days=1)
+                    ts = TIMEZONE_BRT.localize(ts_naive)  # aware BRT
 
                     new_lines.append(f"{p[0]};{ts.timestamp()}")
 
@@ -1960,11 +1965,11 @@ def load_data_for_analysis():
 
 
 
-    # Deduplicao: remove linhas com mesmo valor e timestamp (tolerncia de 1s)
+    # .timestamp() em datetime aware BRT funciona corretamente no Linux (UTC) e Windows
 
-    # Converte timestamp para segundos para comparao
-
-    df["_ts_seconds"] = df["timestamp"].apply(lambda x: int(x.timestamp()))
+    df["_ts_seconds"] = df["timestamp"].apply(
+        lambda x: int(x.timestamp()) if (hasattr(x, 'tzinfo') and x.tzinfo) else int(TIMEZONE_BRT.localize(x).timestamp())
+    )
 
     df = df.drop_duplicates(subset=["value", "_ts_seconds"], keep="first").drop(columns=["_ts_seconds"]).reset_index(drop=True)
 
