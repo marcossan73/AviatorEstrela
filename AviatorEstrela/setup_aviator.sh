@@ -390,6 +390,7 @@ echo -e "${BLUE}[9/10] Testando instalação...${NC}"
 # Teste 1: Python e dependências
 source "$VENV_DIR/bin/activate"
 python3 << 'PYTEST'
+# -*- coding: utf-8 -*-
 import sys
 try:
     import pytz
@@ -397,25 +398,26 @@ try:
     import flask
     import pandas
     import sklearn
-    print("? Todas as dependências Python OK")
+    print("OK - Todas as dependencias Python instaladas")
 except ImportError as e:
-    print(f"? Erro: {e}")
+    print("ERRO - Importacao falhou: " + str(e))
     sys.exit(1)
 
 # Teste timezone
 from datetime import datetime
 brt = pytz.timezone('America/Sao_Paulo')
 agora = datetime.now(brt)
-print(f"? Timezone Brasília: {agora.strftime('%d/%m/%Y %H:%M:%S %Z')}")
+print("OK - Timezone Brasilia: " + agora.strftime('%d/%m/%Y %H:%M:%S %Z'))
 PYTEST
 
 if [ $? -ne 0 ]; then
-    echo -e "${RED}? Teste de dependências falhou!${NC}"
+    echo -e "${RED}ERRO - Teste de dependencias falhou!${NC}"
     exit 1
 fi
 
 # Teste 2: Chrome e Selenium
 python3 << 'CHROMETEST'
+# -*- coding: utf-8 -*-
 import sys
 import os
 from selenium import webdriver
@@ -445,18 +447,18 @@ try:
     titulo = driver.title
     driver.quit()
 
-    print(f"? Chrome + Selenium OK (teste: {titulo})")
+    print("OK - Chrome + Selenium funcionando (teste: " + titulo + ")")
 except Exception as e:
-    print(f"? Erro Chrome/Selenium: {e}")
+    print("ERRO - Chrome/Selenium falhou: " + str(e))
     sys.exit(1)
 CHROMETEST
 
 if [ $? -ne 0 ]; then
-    echo -e "${RED}? Teste de Chrome/Selenium falhou!${NC}"
+    echo -e "${RED}ERRO - Teste de Chrome/Selenium falhou!${NC}"
     exit 1
 fi
 
-echo -e "   ${GREEN}? Todos os testes passaram!${NC}"
+echo -e "   ${GREEN}OK - Todos os testes passaram!${NC}"
 
 # =============================================================================
 # ETAPA 10: CONFIGURAÇÃO FINAL

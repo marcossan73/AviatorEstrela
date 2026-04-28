@@ -13,6 +13,15 @@ chmod +x setup_aviator.sh
 
 **Pronto!** O script cuida de tudo automaticamente.
 
+### Validação Prévia (Opcional)
+
+Para validar o script antes de executar no servidor:
+
+```sh
+chmod +x validar_script.sh
+./validar_script.sh
+```
+
 ---
 
 ## ?? O Que o Script Instala

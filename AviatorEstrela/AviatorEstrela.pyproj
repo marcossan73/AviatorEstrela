@@ -66,6 +66,7 @@
     <Content Include="testar_ordenacao.sh" />
     <Content Include="TIMEZONE_BRASILIA.md" />
     <Content Include="usar_webdriver_manager.sh" />
+    <Content Include="validar_script.sh" />
     <Content Include="WEBDRIVER_MANAGER.md" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
