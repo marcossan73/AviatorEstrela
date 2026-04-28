@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-#  AviatorService.py  —  versão aprimorada com ML adaptativo
-#  Melhorias: feature engineering rica, validação temporal, limpeza de outliers,
-#  seleção automática de modelo por volume de dados, log de acurácia contínuo.
-#  Dashboard e visualizações INALTERADOS.
+#  AviatorService.py    verso aprimorada com ML adaptativo
+#  Melhorias: feature engineering rica, validao temporal, limpeza de outliers,
+#  seleo automtica de modelo por volume de dados, log de acurcia contnuo.
+#  Dashboard e visualizaes INALTERADOS.
 # =============================================================================
 
 from selenium import webdriver
@@ -56,12 +56,12 @@ MODEL_FILE_5  = os.path.join(BASE_DIR, "gap_model_5.pkl")
 MODEL_FILE_10 = os.path.join(BASE_DIR, "gap_model_10.pkl")
 MODEL_FILE_50 = os.path.join(BASE_DIR, "gap_model_50.pkl")
 
-# Modelos de ocorrências (gap em rodadas)
+# Modelos de ocorrncias (gap em rodadas)
 MODEL_FILE_OC_5  = os.path.join(BASE_DIR, "gap_oc_model_5.pkl")
 MODEL_FILE_OC_10 = os.path.join(BASE_DIR, "gap_oc_model_10.pkl")
 MODEL_FILE_OC_50 = os.path.join(BASE_DIR, "gap_oc_model_50.pkl")
 
-# Scalers para normalização
+# Scalers para normalizao
 SCALER_FILE_5    = os.path.join(BASE_DIR, "scaler_5.pkl")
 SCALER_FILE_10   = os.path.join(BASE_DIR, "scaler_10.pkl")
 SCALER_FILE_50   = os.path.join(BASE_DIR, "scaler_50.pkl")
@@ -83,10 +83,10 @@ WINDOW_SIZE  = 5
 PRE_WINDOW   = 4
 
 # ---------------------------------------------------------------------------
-# Limiares adaptativos — o sistema escolhe o modelo conforme os dados crescem
+# Limiares adaptativos  o sistema escolhe o modelo conforme os dados crescem
 # ---------------------------------------------------------------------------
 
-MIN_GAPS_RIDGE        = 8    # regressão linear regularizada
+MIN_GAPS_RIDGE        = 8    # regresso linear regularizada
 MIN_GAPS_RF           = 20   # Random Forest
 MIN_GAPS_GBM          = 50   # Gradient Boosting + CV temporal
 MIN_GAPS_FEATURES_EXT = 15   # features de rolling stats
@@ -176,7 +176,7 @@ def fazer_login(driver):
 
 
 # ===========================================================================
-# Captura dos últimos 50 resultados
+# Captura dos ltimos 50 resultados
 # ===========================================================================
 
 def capturar_ultimos(driver):
@@ -284,7 +284,7 @@ def salvar_arquivo(registros):
 
 
 # ===========================================================================
-# Carga de dados para análise
+# Carga de dados para anlise
 # ===========================================================================
 
 def load_data_for_analysis():
@@ -315,7 +315,7 @@ def load_data_for_analysis():
 
 
 # ===========================================================================
-# MÓDULO ML ADAPTATIVO
+# MDULO ML ADAPTATIVO
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
@@ -328,12 +328,12 @@ def clean_gaps(gaps: pd.Series) -> pd.Series:
         return gaps
 
     if len(gaps) < 20:
-        # IQR ampliado — menos agressivo com poucos dados
+        # IQR ampliado  menos agressivo com poucos dados
         q1, q3 = gaps.quantile(0.25), gaps.quantile(0.75)
         iqr = q3 - q1
         lower, upper = q1 - 2.5 * iqr, q3 + 2.5 * iqr
     else:
-        # z-score ±3σ para amostras maiores
+        # z-score 3 para amostras maiores
         mean, std = gaps.mean(), gaps.std()
         lower, upper = mean - 3 * std, mean + 3 * std
 
@@ -351,12 +351,12 @@ def clean_gaps(gaps: pd.Series) -> pd.Series:
 def build_features(gaps: pd.Series):
     """
     Gera matriz de features X e vetor alvo y.
-    A janela e os tipos de feature crescem com o volume de dados disponíveis.
+    A janela e os tipos de feature crescem com o volume de dados disponveis.
     Retorna (X, y).
     """
     n = len(gaps)
 
-    # Janela de lags dinâmica
+    # Janela de lags dinmica
     if n < 10:
         lag_window = 2
     elif n < 20:
@@ -376,16 +376,16 @@ def build_features(gaps: pd.Series):
             window_vals = gaps.iloc[max(0, i - lag_window):i]
             wm = window_vals.mean()
             row += [
-                wm,                                                          # média da janela
-                window_vals.std() if len(window_vals) > 1 else 0.0,         # desvio padrão
-                window_vals.min(),                                           # mínimo
-                window_vals.max(),                                           # máximo
-                gaps.iloc[i - 1] / (wm + 1e-9),                            # ratio último/média
-                float((window_vals.diff().dropna() > 0).sum()),             # nº de altas
+                wm,                                                          # mdia da janela
+                window_vals.std() if len(window_vals) > 1 else 0.0,         # desvio padro
+                window_vals.min(),                                           # mnimo
+                window_vals.max(),                                           # mximo
+                gaps.iloc[i - 1] / (wm + 1e-9),                            # ratio ltimo/mdia
+                float((window_vals.diff().dropna() > 0).sum()),             # n de altas
                 gaps.iloc[i - 1] - gaps.iloc[i - lag_window],               # delta da janela
             ]
 
-        # Posição relativa na série (tendência temporal leve)
+        # Posio relativa na srie (tendncia temporal leve)
         if n >= 30:
             row.append(i / n)
 
@@ -396,11 +396,11 @@ def build_features(gaps: pd.Series):
 
 
 # ---------------------------------------------------------------------------
-# 3. Seleção automática de modelo por volume
+# 3. Seleo automtica de modelo por volume
 # ---------------------------------------------------------------------------
 
 def select_model(n_gaps: int):
-    """Retorna (model, model_name) adequados para o volume de dados disponível."""
+    """Retorna (model, model_name) adequados para o volume de dados disponvel."""
     if n_gaps >= MIN_GAPS_GBM:
         return GradientBoostingRegressor(
             n_estimators=300, max_depth=4,
@@ -419,7 +419,7 @@ def select_model(n_gaps: int):
 
 
 # ---------------------------------------------------------------------------
-# 4. Log de acurácia
+# 4. Log de acurcia
 # ---------------------------------------------------------------------------
 
 def load_accuracy_log() -> dict:
@@ -441,14 +441,14 @@ def save_accuracy_log(acc_log: dict):
 
 
 # ---------------------------------------------------------------------------
-# 5. Treinamento com validação temporal — só salva se melhorar
+# 5. Treinamento com validao temporal  s salva se melhorar
 # ---------------------------------------------------------------------------
 
 def train_and_maybe_update(gaps: pd.Series, model_file: str,
                             scaler_file: str, log_key: str) -> dict:
     """
-    Treina, valida e substitui o modelo apenas se a acurácia melhorar.
-    Suporta amostras pequenas com degradação graciosa.
+    Treina, valida e substitui o modelo apenas se a acurcia melhorar.
+    Suporta amostras pequenas com degradao graciosa.
     """
     metrics = {'model_name': 'Estatistico', 'n_gaps': len(gaps),
                'mae': None, 'rmse': None, 'cv_mae': None, 'cv_std': None}
@@ -468,7 +468,7 @@ def train_and_maybe_update(gaps: pd.Series, model_file: str,
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
 
-        # Validação cruzada temporal (quando há dados suficientes)
+        # Validao cruzada temporal (quando h dados suficientes)
         if n >= MIN_GAPS_GBM and len(X) >= 15:
             n_splits = min(5, len(X) // 5)
             tscv = TimeSeriesSplit(n_splits=n_splits)
@@ -479,7 +479,7 @@ def train_and_maybe_update(gaps: pd.Series, model_file: str,
             metrics['cv_mae'] = float(-cv_scores.mean())
             metrics['cv_std'] = float(cv_scores.std())
             log(f"  [{log_key}] CV-MAE: {metrics['cv_mae']:.1f}s "
-                f"(±{metrics['cv_std']:.1f}s) | Modelo: {model_name}")
+                f"({metrics['cv_std']:.1f}s) | Modelo: {model_name}")
         else:
             log(f"  [{log_key}] Amostra limitada ({n} gaps) | Modelo: {model_name}")
 
@@ -513,7 +513,7 @@ def train_and_maybe_update(gaps: pd.Series, model_file: str,
                     log(f"  [{log_key}] Modelo anterior mantido "
                         f"(MAE {old_mae:.1f}s vs {new_mae:.1f}s)")
             except Exception:
-                pass  # modelo incompatível → substitui
+                pass  # modelo incompatvel  substitui
 
         if should_save:
             model.fit(X_scaled, y)   # retreina com 100% antes de salvar
@@ -521,7 +521,7 @@ def train_and_maybe_update(gaps: pd.Series, model_file: str,
             joblib.dump(scaler, scaler_file)
             log(f"  [{log_key}] Modelo atualizado e salvo.")
 
-        # Persiste log de acurácia
+        # Persiste log de acurcia
         acc_log = load_accuracy_log()
         if log_key not in acc_log:
             acc_log[log_key] = []
@@ -541,14 +541,14 @@ def train_and_maybe_update(gaps: pd.Series, model_file: str,
 
 
 # ---------------------------------------------------------------------------
-# 6. Predição robusta com fallback estatístico
+# 6. Predio robusta com fallback estatstico
 # ---------------------------------------------------------------------------
 
 def predict_next_gap(gaps: pd.Series, model_file: str,
                       scaler_file: str, mean_gap: float) -> float:
     """
     Retorna o gap previsto em segundos (ou rodadas).
-    Fallback: média ponderada (recentes pesam mais) → média simples.
+    Fallback: mdia ponderada (recentes pesam mais)  mdia simples.
     """
     if os.path.exists(model_file) and len(gaps) >= MIN_GAPS_RIDGE:
         try:
@@ -564,14 +564,14 @@ def predict_next_gap(gaps: pd.Series, model_file: str,
                 last_x = scaler.transform(last_x)
 
             pred = float(model.predict(last_x)[0])
-            # Sanitização — rejeita predições negativas ou absurdas
+            # Sanitizao  rejeita predies negativas ou absurdas
             pred = max(pred, 1.0)
             pred = min(pred, mean_gap * 10)
             return pred
         except Exception as e:
             log(f"  [WARN] Predicao ML falhou ({e}), usando fallback.")
 
-    # Fallback: média ponderada exponencial
+    # Fallback: mdia ponderada exponencial
     if len(gaps) >= 3:
         weights = np.linspace(0.5, 1.5, len(gaps))
         return float(np.average(gaps.values, weights=weights))
@@ -580,7 +580,7 @@ def predict_next_gap(gaps: pd.Series, model_file: str,
 
 
 # ===========================================================================
-# Funções de análise
+# Funes de anlise
 # ===========================================================================
 
 def analyze_spikes(df, threshold, label):
@@ -604,22 +604,22 @@ def analyze_spikes(df, threshold, label):
     if raw_gaps.empty:
         return None
 
-    # ── Limpeza de outliers ──────────────────────────────────────────────────
+    #  Limpeza de outliers 
     gaps    = clean_gaps(raw_gaps)
     gaps_oc = clean_gaps(gaps_oc_raw)
 
-    # ── Estatísticas descritivas ─────────────────────────────────────────────
+    #  Estatsticas descritivas 
     mean_gap   = gaps.mean()
     median_gap = gaps.median()
     std_gap    = gaps.std() if len(gaps) > 1 else 0.0
     if pd.isna(std_gap):
         std_gap = 0.0
 
-    # Percentis para janela de confiança mais robusta
+    # Percentis para janela de confiana mais robusta
     p25 = gaps.quantile(0.25) if len(gaps) >= 4 else mean_gap - std_gap
     p75 = gaps.quantile(0.75) if len(gaps) >= 4 else mean_gap + std_gap
 
-    # ── Seleção de arquivos por threshold ────────────────────────────────────
+    #  Seleo de arquivos por threshold 
     if threshold == THRESHOLD_5:
         model_file, model_file_oc = MODEL_FILE_5,  MODEL_FILE_OC_5
         scaler_file, scaler_oc    = SCALER_FILE_5, SCALER_FILE_OC_5
@@ -633,27 +633,27 @@ def analyze_spikes(df, threshold, label):
         scaler_file, scaler_oc    = SCALER_FILE_50, SCALER_FILE_OC_50
         log_key, log_key_oc       = "50", "oc_50"
 
-    # ── Treinamento adaptativo — modelo de tempo ─────────────────────────────
+    #  Treinamento adaptativo  modelo de tempo 
     train_and_maybe_update(gaps, model_file, scaler_file, f">{threshold} tempo")
 
-    # ── Treinamento adaptativo — modelo de ocorrências ───────────────────────
+    #  Treinamento adaptativo  modelo de ocorrncias 
     if len(gaps_oc) > 5:
         train_and_maybe_update(gaps_oc, model_file_oc, scaler_oc,
                                f">{threshold} rodadas")
 
-    # ── Predição de tempo ────────────────────────────────────────────────────
+    #  Predio de tempo 
     predicted_gap = predict_next_gap(gaps, model_file, scaler_file, mean_gap)
 
-    # ── Predição de ocorrências ──────────────────────────────────────────────
+    #  Predio de ocorrncias 
     mean_oc = gaps_oc.mean() if not gaps_oc.empty else 0
     predicted_gap_oc = predict_next_gap(gaps_oc, model_file_oc, scaler_oc, mean_oc) \
         if not gaps_oc.empty else 0.0
 
-    # Rodadas desde o último pico (usa índice original do df)
+    # Rodadas desde o ltimo pico (usa ndice original do df)
     original_spike_idx = df[df["value"] > threshold].index
     current_oc = (len(df) - 1) - original_spike_idx[-1] if len(original_spike_idx) > 0 else 0
 
-    # ── Janela de confiança robusta ──────────────────────────────────────────
+    #  Janela de confiana robusta 
     if len(gaps) >= 10:
         half_low  = predicted_gap - (predicted_gap - p25) * 0.5
         half_high = predicted_gap + (p75 - predicted_gap) * 0.5
@@ -666,7 +666,7 @@ def analyze_spikes(df, threshold, label):
     predicted_early  = last_spike_time + timedelta(seconds=half_low)
     predicted_late   = last_spike_time + timedelta(seconds=half_high)
 
-    # ── Saída no terminal (formato idêntico ao original) ─────────────────────
+    #  Sada no terminal (formato idntico ao original) 
     print(f"\n[ANALYSIS] {label} - Analise de Picos:")
     print(f"  Total de picos: {len(spikes)}")
     print(f"  Intervalo medio: {mean_gap/60:.2f} min (+/-{std_gap/60:.2f} min)")
@@ -678,10 +678,10 @@ def analyze_spikes(df, threshold, label):
     print(f"  Proximo pico estimado: {predicted_next.strftime('%d/%m/%Y %H:%M:%S')}")
     print(f"  Janela provavel: {predicted_early.strftime('%H:%M:%S')} -> {predicted_late.strftime('%H:%M:%S')}")
 
-    # ── Salva previsão ───────────────────────────────────────────────────────
+    #  Salva previso 
     save_prediction(threshold, predicted_next, predicted_early, predicted_late)
 
-    # ── Atualiza dashboard (chaves idênticas ao original) ────────────────────
+    #  Atualiza dashboard (chaves idnticas ao original) 
     if threshold == THRESHOLD_5:
         key = 'spikes_5'
     elif threshold == THRESHOLD_10:
@@ -710,13 +710,13 @@ def analyze_trends(df):
     df = df.copy()
     df["rolling_mean"] = df["value"].rolling(WINDOW_SIZE).mean()
 
-    # Slope linear (grau 1) — mantido para exibição
+    # Slope linear (grau 1)  mantido para exibio
     df["rolling_slope"] = df["value"].rolling(WINDOW_SIZE).apply(
         lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == WINDOW_SIZE else np.nan,
         raw=True
     )
 
-    # Curvatura (grau 2) — melhora a projeção capturando aceleração
+    # Curvatura (grau 2)  melhora a projeo capturando acelerao
     df["rolling_curv"] = df["value"].rolling(WINDOW_SIZE).apply(
         lambda x: np.polyfit(range(len(x)), x, 2)[0] if len(x) == WINDOW_SIZE else np.nan,
         raw=True
@@ -729,14 +729,14 @@ def analyze_trends(df):
         last_slope = df["rolling_slope"].iloc[-1]
         last_curv  = df["rolling_curv"].iloc[-1] if not df["rolling_curv"].isna().all() else 0.0
 
-        # Saída no terminal (formato idêntico ao original)
+        # Sada no terminal (formato idntico ao original)
         print("\n[ANALYSIS] Tendencia Rolling Window (ultimas 5 amostras):")
         print(f"  Media: {last_mean:.2f}")
         print(f"  Inclinacao: {last_slope:.4f}")
 
         projections = []
         for i in range(1, 5):
-            # Projeção com componente quadrático (mais precisa que linear puro)
+            # Projeo com componente quadrtico (mais precisa que linear puro)
             pred = last_mean + i * last_slope + (i ** 2) * last_curv * 0.5
             projections.append(pred)
             print(f"  Projecao proxima {i}: {pred:.2f}")
@@ -747,7 +747,7 @@ def analyze_trends(df):
             if pred > THRESHOLD_50:
                 print(f"    ALERTA: Projecao {i} aponta para valor > 50!")
 
-        # Atualiza dashboard (chaves idênticas ao original)
+        # Atualiza dashboard (chaves idnticas ao original)
         latest_analysis['trends'] = {
             'mean':  last_mean,
             'slope': last_slope,
@@ -850,7 +850,7 @@ def run_analysis():
         'c50': len(last_50_df[last_50_df['value'] >= 50])
     }
 
-    # Pre-calcula rolling para o gráfico
+    # Pre-calcula rolling para o grfico
     df_chart = df.copy()
     df_chart["rolling_mean"]  = df_chart["value"].rolling(WINDOW_SIZE).mean()
     df_chart["rolling_slope"] = df_chart["value"].rolling(WINDOW_SIZE).apply(
@@ -881,12 +881,12 @@ def run_analysis():
         })
     latest_analysis['last_100'] = last_50_formatted
 
-    # Análise para cada threshold
+    # Anlise para cada threshold
     analyze_spikes(df, THRESHOLD_5,  ">5")
     analyze_spikes(df, THRESHOLD_10, ">10")
     analyze_spikes(df, THRESHOLD_50, ">50")
 
-    # Tendências
+    # Tendncias
     analyze_trends(df)
 
     # Assinaturas
@@ -894,10 +894,10 @@ def run_analysis():
     analyze_signatures(df, THRESHOLD_10, ">10")
     analyze_signatures(df, THRESHOLD_50, ">50")
 
-    # Verifica e atualiza previsões
+    # Verifica e atualiza previses
     check_predictions(df)
 
-    # Exibe estatísticas de previsões
+    # Exibe estatsticas de previses
     if os.path.exists(PREDICTIONS_FILE):
         stats = {}
         with open(PREDICTIONS_FILE, "r", encoding="utf-8") as f:
@@ -946,7 +946,7 @@ def run_analysis():
 
 
 # ===========================================================================
-# Loop principal do serviço
+# Loop principal do servio
 # ===========================================================================
 
 def main():
@@ -1032,7 +1032,7 @@ def main():
 
 
 # ===========================================================================
-# Flask App (dashboard idêntico ao original)
+# Flask App (dashboard idntico ao original)
 # ===========================================================================
 
 if __name__ == "__main__":
@@ -1080,7 +1080,7 @@ if __name__ == "__main__":
                 <div class="sidebar">
                     <div class="card" style="text-align: center; font-size: 14px; color: #666;">
                         <p><strong>Atual:</strong> {{ now }}</p>
-                        <p><strong>Última:</strong> {{ ultimo.split(' - ')[0] if ultimo else 'N/A' }}</p>
+                        <p><strong>ltima:</strong> {{ ultimo.split(' - ')[0] if ultimo else 'N/A' }}</p>
                     </div>
 
                     <div class="card">
@@ -1091,48 +1091,48 @@ if __name__ == "__main__":
                                 <p class="kpi-value" style="font-size: 20px;">{{ total_registros }}</p>
                             </div>
                             <div class="kpi" style="flex:1; margin-bottom:10px; padding: 10px;">
-                                <h4>Último Valor</h4>
+                                <h4>ltimo Valor</h4>
                                 <p class="kpi-value" style="color:#333; font-size: 20px;">{{ ultimo.split(' - ')[1] if ultimo else 'N/A' }}</p>
                             </div>
                         </div>
                         <div style="font-size:13px; margin-top:5px; border-top:1px solid #eee; padding-top:10px; text-align: center;">
-                            <strong>Nas últimas 100 rodadas:</strong><br>
+                            <strong>Nas ltimas 100 rodadas:</strong><br>
                             <span style="color:#6f42c1;font-weight:bold;">>2:</span> {{ counts_100.c2 if counts_100 else 0 }} | 
                             <span style="color:#28a745;font-weight:bold;">>5:</span> {{ counts_100.c5 if counts_100 else 0 }} | 
                             <span style="color:#e83e8c;font-weight:bold;">>10:</span> {{ counts_100.c10 if counts_100 else 0 }} | 
                             <span style="color:#007bff;font-weight:bold;">>50:</span> {{ counts_100.c50 if counts_100 else 0 }}
                         </div>
-                        <p style="font-size:12px;text-align:center;color:#666;margin-top:10px;">Período: {{ periodo }}</p>
+                        <p style="font-size:12px;text-align:center;color:#666;margin-top:10px;">Perodo: {{ periodo }}</p>
                     </div>
 
                     <div class="card">
-                        <h3>Alertas & Tendências</h3>
+                        <h3>Alertas & Tendncias</h3>
                         {% if trends and trends.projections %}
                             {% for proj in trends.projections %}
                                 {% if proj.alert_50 %}
-                                    <div class="alert" data-level="50" style="background-color: #f8d7da; color: #721c24;">ALERTA! Previsão {{ loop.index }} aponta p/ >50</div>
+                                    <div class="alert" data-level="50" style="background-color: #f8d7da; color: #721c24;">ALERTA! Previso {{ loop.index }} aponta p/ >50</div>
                                 {% elif proj.alert_10 %}
-                                    <div class="alert" data-level="10" style="background-color: #cce5ff; color: #004085;">ALERTA! Previsão {{ loop.index }} aponta p/ >10</div>
+                                    <div class="alert" data-level="10" style="background-color: #cce5ff; color: #004085;">ALERTA! Previso {{ loop.index }} aponta p/ >10</div>
                                 {% elif proj.alert_5 %}
-                                    <div class="alert" data-level="5">ALERTA! Previsão {{ loop.index }} aponta p/ >5</div>
+                                    <div class="alert" data-level="5">ALERTA! Previso {{ loop.index }} aponta p/ >5</div>
                                 {% endif %}
                             {% endfor %}
-                            <p><strong>Média Movel:</strong> {{ "%.2f"|format(trends.mean) }}</p>
-                            <p><strong>Inclinação:</strong> {{ "%.4f"|format(trends.slope) }}</p>
-                            <p><strong>Próximas 4 Projeções:</strong> 
+                            <p><strong>Mdia Movel:</strong> {{ "%.2f"|format(trends.mean) }}</p>
+                            <p><strong>Inclinao:</strong> {{ "%.4f"|format(trends.slope) }}</p>
+                            <p><strong>Prximas 4 Projees:</strong> 
                             {% for proj in trends.projections %}
                                 {{ "%.2f"|format(proj.value) }} {% if not loop.last %} | {% endif %}
                             {% endfor %}
                             </p>
                         {% else %}
-                            <p>Análise em andamento...</p>
+                            <p>Anlise em andamento...</p>
                         {% endif %}
                     </div>
                 </div>
 
                 <div class="main-content">
                     <div class="card">
-                        <h3>Últimas 100 Ocorrências</h3>
+                        <h3>ltimas 100 Ocorrncias</h3>
                         <canvas id="historyChart" width="400" height="80"></canvas>
 
                         <div class="history-list">
@@ -1148,38 +1148,38 @@ if __name__ == "__main__":
                         <div class="card">
                             <h3>Spikes > 5</h3>
                             <p><strong>Total Picos:</strong> {{ spikes_5.total if spikes_5 else 'N/A' }}</p>
-                            <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_5.mean_gap) if spikes_5 else 'N/A' }} min</p>
-                            <p><strong>Previsão Tempo ML:</strong> {{ "%.2f"|format(spikes_5.predicted_gap) if spikes_5 else 'N/A' }} min</p>
-                            <p><strong>Previsão (Rodadas):</strong> {{ "%.1f"|format(spikes_5.predicted_gap_oc) if spikes_5 else 'N/A' }}</p>
-                            <p><strong>Desde Último Pico:</strong> {{ spikes_5.current_oc if spikes_5 else 'N/A' }} rodadas</p>
-                            <p><strong>Próximo Pico:</strong> <span style="color:#e83e8c;font-weight:bold;">{{ spikes_5.predicted_next if spikes_5 else 'N/A' }}</span></p>
+                            <p><strong>Gap Mdio:</strong> {{ "%.2f"|format(spikes_5.mean_gap) if spikes_5 else 'N/A' }} min</p>
+                            <p><strong>Previso Tempo ML:</strong> {{ "%.2f"|format(spikes_5.predicted_gap) if spikes_5 else 'N/A' }} min</p>
+                            <p><strong>Previso (Rodadas):</strong> {{ "%.1f"|format(spikes_5.predicted_gap_oc) if spikes_5 else 'N/A' }}</p>
+                            <p><strong>Desde ltimo Pico:</strong> {{ spikes_5.current_oc if spikes_5 else 'N/A' }} rodadas</p>
+                            <p><strong>Prximo Pico:</strong> <span style="color:#e83e8c;font-weight:bold;">{{ spikes_5.predicted_next if spikes_5 else 'N/A' }}</span></p>
                             <p><strong>Janela:</strong> {{ spikes_5.window if spikes_5 else 'N/A' }}</p>
                             <br>
-                            <p style="font-size:12px;color:#666;">Performance Previsões >5: <br>Acertos: {{ pred_5.hits if pred_5 else 'N/A' }} / Erros: {{ pred_5.misses if pred_5 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_5.rate) if pred_5 and pred_5.rate is not none else 'N/A' }}%</p>
+                            <p style="font-size:12px;color:#666;">Performance Previses >5: <br>Acertos: {{ pred_5.hits if pred_5 else 'N/A' }} / Erros: {{ pred_5.misses if pred_5 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_5.rate) if pred_5 and pred_5.rate is not none else 'N/A' }}%</p>
                         </div>
                         <div class="card">
                             <h3>Spikes > 10</h3>
                             <p><strong>Total Picos:</strong> {{ spikes_10.total if spikes_10 else 'N/A' }}</p>
-                            <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_10.mean_gap) if spikes_10 else 'N/A' }} min</p>
-                            <p><strong>Previsão Tempo ML:</strong> {{ "%.2f"|format(spikes_10.predicted_gap) if spikes_10 else 'N/A' }} min</p>
-                            <p><strong>Previsão (Rodadas):</strong> {{ "%.1f"|format(spikes_10.predicted_gap_oc) if spikes_10 else 'N/A' }}</p>
-                            <p><strong>Desde Último Pico:</strong> {{ spikes_10.current_oc if spikes_10 else 'N/A' }} rodadas</p>
-                            <p><strong>Próximo Pico:</strong> <span style="color:#007bff;font-weight:bold;">{{ spikes_10.predicted_next if spikes_10 else 'N/A' }}</span></p>
+                            <p><strong>Gap Mdio:</strong> {{ "%.2f"|format(spikes_10.mean_gap) if spikes_10 else 'N/A' }} min</p>
+                            <p><strong>Previso Tempo ML:</strong> {{ "%.2f"|format(spikes_10.predicted_gap) if spikes_10 else 'N/A' }} min</p>
+                            <p><strong>Previso (Rodadas):</strong> {{ "%.1f"|format(spikes_10.predicted_gap_oc) if spikes_10 else 'N/A' }}</p>
+                            <p><strong>Desde ltimo Pico:</strong> {{ spikes_10.current_oc if spikes_10 else 'N/A' }} rodadas</p>
+                            <p><strong>Prximo Pico:</strong> <span style="color:#007bff;font-weight:bold;">{{ spikes_10.predicted_next if spikes_10 else 'N/A' }}</span></p>
                             <p><strong>Janela:</strong> {{ spikes_10.window if spikes_10 else 'N/A' }}</p>
                             <br>
-                            <p style="font-size:12px;color:#666;">Performance Previsões >10: <br>Acertos: {{ pred_10.hits if pred_10 else 'N/A' }} / Erros: {{ pred_10.misses if pred_10 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_10.rate) if pred_10 and pred_10.rate is not none else 'N/A' }}%</p>
+                            <p style="font-size:12px;color:#666;">Performance Previses >10: <br>Acertos: {{ pred_10.hits if pred_10 else 'N/A' }} / Erros: {{ pred_10.misses if pred_10 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_10.rate) if pred_10 and pred_10.rate is not none else 'N/A' }}%</p>
                         </div>
                         <div class="card">
                             <h3>Spikes > 50</h3>
                             <p><strong>Total Picos:</strong> {{ spikes_50.total if spikes_50 else 'N/A' }}</p>
-                            <p><strong>Gap Médio:</strong> {{ "%.2f"|format(spikes_50.mean_gap) if spikes_50 else 'N/A' }} min</p>
-                            <p><strong>Previsão Tempo ML:</strong> {{ "%.2f"|format(spikes_50.predicted_gap) if spikes_50 else 'N/A' }} min</p>
-                            <p><strong>Previsão (Rodadas):</strong> {{ "%.1f"|format(spikes_50.predicted_gap_oc) if spikes_50 else 'N/A' }}</p>
-                            <p><strong>Desde Último Pico:</strong> {{ spikes_50.current_oc if spikes_50 else 'N/A' }} rodadas</p>
-                            <p><strong>Próximo Pico:</strong> <span id="next-spike-50" style="color:#6f42c1;font-weight:bold;">{{ spikes_50.predicted_next if spikes_50 else 'N/A' }}</span></p>
+                            <p><strong>Gap Mdio:</strong> {{ "%.2f"|format(spikes_50.mean_gap) if spikes_50 else 'N/A' }} min</p>
+                            <p><strong>Previso Tempo ML:</strong> {{ "%.2f"|format(spikes_50.predicted_gap) if spikes_50 else 'N/A' }} min</p>
+                            <p><strong>Previso (Rodadas):</strong> {{ "%.1f"|format(spikes_50.predicted_gap_oc) if spikes_50 else 'N/A' }}</p>
+                            <p><strong>Desde ltimo Pico:</strong> {{ spikes_50.current_oc if spikes_50 else 'N/A' }} rodadas</p>
+                            <p><strong>Prximo Pico:</strong> <span id="next-spike-50" style="color:#6f42c1;font-weight:bold;">{{ spikes_50.predicted_next if spikes_50 else 'N/A' }}</span></p>
                             <p><strong>Janela:</strong> {{ spikes_50.window if spikes_50 else 'N/A' }}</p>
                             <br>
-                            <p style="font-size:12px;color:#666;">Performance Previsões >50: <br>Acertos: {{ pred_50.hits if pred_50 else 'N/A' }} / Erros: {{ pred_50.misses if pred_50 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_50.rate) if pred_50 and pred_50.rate is not none else 'N/A' }}%</p>
+                            <p style="font-size:12px;color:#666;">Performance Previses >50: <br>Acertos: {{ pred_50.hits if pred_50 else 'N/A' }} / Erros: {{ pred_50.misses if pred_50 else 'N/A' }} / Taxa: {{ "%.1f"|format(pred_50.rate) if pred_50 and pred_50.rate is not none else 'N/A' }}%</p>
                         </div>
                     </div>
                 </div>
@@ -1190,7 +1190,7 @@ if __name__ == "__main__":
                 if(canvas) {
                     const ctx = canvas.getContext('2d');
                     const lastData = {{ last_100|tojson if last_100 else '[]' }};
-                    const chartData = lastData.slice(-50); // Mantém exibição gráfica em 50
+                    const chartData = lastData.slice(-50); // Mantm exibio grfica em 50
 
                     const labels = chartData.map(d => d.time);
                     const values = chartData.map(d => d.value);
@@ -1214,7 +1214,7 @@ if __name__ == "__main__":
                                 tension: 0.1
                             },
                             {
-                                label: 'Média Móvel (5)',
+                                label: 'Mdia Mvel (5)',
                                 data: rollingMeans,
                                 borderColor: '#ffc107',
                                 borderWidth: 1,
@@ -1224,7 +1224,7 @@ if __name__ == "__main__":
                                 tension: 0.2
                             },
                             {
-                                label: 'Projeção de Tendência',
+                                label: 'Projeo de Tendncia',
                                 data: projections,
                                 borderColor: '#dc3545',
                                 borderWidth: 1,
@@ -1268,7 +1268,7 @@ if __name__ == "__main__":
 
                 function updateBtn() {
                     if(!btnSound) return;
-                    btnSound.innerText = soundEnabled ? "🔊 Som Ativado" : "🔇 Ativar Som";
+                    btnSound.innerText = soundEnabled ? " Som Ativado" : " Ativar Som";
                     btnSound.style.backgroundColor = soundEnabled ? "#28a745" : "#6c757d";
                 }
 
@@ -1278,7 +1278,7 @@ if __name__ == "__main__":
                         soundEnabled = !soundEnabled;
                         localStorage.setItem('sound_enabled', soundEnabled);
                         updateBtn();
-                        if(soundEnabled) playChangeSound(); // Toca som de teste para garantir interação
+                        if(soundEnabled) playChangeSound(); // Toca som de teste para garantir interao
                     });
                 }
 
@@ -1350,7 +1350,7 @@ if __name__ == "__main__":
                         localStorage.setItem('last_spike_50', currentSpike50);
                     }
 
-                    // Tocar alarmes (se ativado pelo usuário)
+                    // Tocar alarmes (se ativado pelo usurio)
                     if (beepCount > 0) {
                         setTimeout(() => playAlertSound(beepCount), 500);
                     } else if (spikeChanged) {

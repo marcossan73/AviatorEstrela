@@ -25,6 +25,7 @@
     <Compile Include="AviatorEstrela.py" />
     <Compile Include="AviatorService.py" />
     <Compile Include="aviator_service2.py" />
+    <Compile Include="fix_encoding.py" />
     <Compile Include="ml_diagnostico.py" />
     <Compile Include="test_ml.py" />
     <Compile Include="_platform_compat.py" />
