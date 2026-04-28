@@ -33,6 +33,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="CHROME_PRONTO.md" />
+    <Content Include="CORRECAO_ENCODING.md" />
     <Content Include="CORRECAO_ORDENACAO.md" />
     <Content Include="criar_servico_systemd.sh" />
     <Content Include="detectar_chrome_real.sh" />
