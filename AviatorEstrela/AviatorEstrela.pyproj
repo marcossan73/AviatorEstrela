@@ -42,6 +42,7 @@
     <Content Include="iniciar_garantido.sh" />
     <Content Include="iniciar_screen.sh" />
     <Content Include="instalacao_automatica.sh" />
+    <Content Include="INSTALACAO_RAPIDA.md" />
     <Content Include="instalar_chrome_apt.sh" />
     <Content Include="instalar_chrome_forcado.sh" />
     <Content Include="instalar_linux.sh" />
@@ -56,6 +57,7 @@
     <Content Include="README_INSTALACAO.md" />
     <Content Include="requirements.txt" />
     <Content Include="resultados_aviator - Copy.txt" />
+    <Content Include="setup_aviator.sh" />
     <Content Include="solucao_chrome.sh" />
     <Content Include="SOLUCAO_CHROME_LINUX.md" />
     <Content Include="SOLUCAO_SNAP_APT.md" />
