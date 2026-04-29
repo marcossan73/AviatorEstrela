@@ -2253,6 +2253,14 @@ def dashboard():
 
                         <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
 
+                            <small>Previsao ML (Rodadas)</small><br>
+
+                            <strong style="color:#cc5500;">{{ "%.0f"|format(data.spikes_1500.predicted_gap_rounds) }} rod.</strong>
+
+                        </div>
+
+                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
+
                             <small>Valor Estimado</small><br>
 
                             <strong style="color:#ff6600;">{{ "%.0f"|format(data.spikes_1500.predicted_value) }}x</strong>
@@ -2628,6 +2636,30 @@ def dashboard():
 
 
             window.addEventListener('DOMContentLoaded', () => {
+
+                // ---- Ajuste de fuso: subtrai 5h de todos os horarios HH:MM:SS exibidos ----
+                function shiftTime(timeStr, offsetHours) {
+                    const m = timeStr.match(/(\d{2}):(\d{2}):(\d{2})/);
+                    if (!m) return timeStr;
+                    let h = parseInt(m[1]) + offsetHours;
+                    let min = parseInt(m[2]);
+                    let sec = parseInt(m[3]);
+                    h = ((h % 24) + 24) % 24;
+                    return timeStr.replace(m[0], `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`);
+                }
+                function adjustAllTimes(root, offset) {
+                    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+                    const nodes = [];
+                    let n;
+                    while ((n = walker.nextNode())) nodes.push(n);
+                    nodes.forEach(node => {
+                        if (/\d{2}:\d{2}:\d{2}/.test(node.nodeValue)) {
+                            node.nodeValue = node.nodeValue.replace(/(\d{2}:\d{2}:\d{2})/g, t => shiftTime(t, offset));
+                        }
+                    });
+                }
+                adjustAllTimes(document.body, -5);
+                // ---- fim ajuste fuso ----
 
                 let maxLevel = 0;
 
