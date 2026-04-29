@@ -2407,7 +2407,29 @@ def dashboard():
 
         </div>
 
-
+        <!-- Rodape -->
+        <div style="background:#1a1a2e; color:#ccc; text-align:center; padding:22px 40px; margin-top:10px; font-size:13px; border-top:3px solid #e83e8c;">
+            <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:40px; margin-bottom:14px; align-items:center;">
+                <div>
+                    <p style="margin:0 0 6px 0; color:#ff6600; font-weight:bold; font-size:15px;">&#9992; Bets Suportadas</p>
+                    <a href="https://estrelabet.bet.br/pb/?affid=350091&amp;cxd=ktsbqpepcvewcjeje!liioet"
+                       target="_blank"
+                       style="display:inline-block; background:linear-gradient(135deg,#ff6600,#ff9900); color:#fff; font-weight:bold; padding:8px 18px; border-radius:6px; text-decoration:none; font-size:14px; margin-right:8px;">
+                        &#11088; Estrela Bet
+                    </a>
+                    <span style="color:#aaa; font-size:13px;">Luck Bet &nbsp;|&nbsp; Start Bet</span>
+                </div>
+                <div>
+                    <p style="margin:0 0 4px 0; color:#28a745; font-weight:bold; font-size:15px;">&#128140; Colaboracao</p>
+                    <a href="mailto:marcossan73@hotmail.com" style="color:#4fc3f7; text-decoration:none;">marcossan73@hotmail.com</a>
+                </div>
+                <div>
+                    <p style="margin:0 0 4px 0; color:#e83e8c; font-weight:bold; font-size:15px;">&#128178; Doacoes (PIX)</p>
+                    <span style="color:#fff; font-weight:bold; letter-spacing:0.5px;">marcossan73@jim.com.br</span>
+                </div>
+            </div>
+            <p style="margin:0; font-size:11px; color:#666;">Aviator ML Intelligence &mdash; uso educacional. Aposte com responsabilidade.</p>
+        </div>
 
         <script>
 
