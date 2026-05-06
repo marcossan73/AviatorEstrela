@@ -1557,127 +1557,94 @@ def analyze_spikes(df_full, threshold, label):
 
     last_spike_str = last_spike.strftime('%H:%M:%S')
 
+    last_spike_date = last_spike.strftime('%d/%m')
+
+    last_spike_value = float(spikes['value'].iloc[-1])
 
 
-    # Store the prediction in history, unique per last_spike (deduplicao por timestamp completo)
 
-    if not any(h.get('spike_ts', h.get('spike_time')) == last_spike_iso for h in old_history):
+    # ------------------------------------------------------------------
+    # HISTORICO: cada entrada = um spike REAL ja ocorrido.
+    # A previsao registrada e a que estava ATIVA no momento do spike,
+    # ou seja, a previsao feita pelo ciclo ANTERIOR a este spike.
+    # ------------------------------------------------------------------
 
-        old_history.insert(0, {
+    if not any(h.get('spike_ts') == last_spike_iso for h in old_history):
 
-            'prev_time': agora_brasilia().strftime('%H:%M:%S'),
+        # Recupera a previsao que estava ativa antes deste spike ocorrer
+        prev_pred = latest_analysis.get(key, {})
 
-            'spike_time': last_spike_str,
+        pred_value_prev   = prev_pred.get('predicted_value', None)
+        pred_time_prev    = prev_pred.get('next', None)
+        pred_window_prev  = prev_pred.get('window', None)
+        pred_rounds_prev  = prev_pred.get('predicted_gap_rounds', None)
+        win_start_prev    = prev_pred.get('window_start_ts', None)
+        win_end_prev      = prev_pred.get('window_end_ts', None)
 
-            'spike_ts': last_spike_iso,
+        # Verifica se o spike ocorreu dentro da janela prevista
+        hit_time = None
+        if win_start_prev and win_end_prev:
+            try:
+                rs_t = TIMEZONE_BRT.localize(datetime.strptime(last_spike_iso, '%Y-%m-%d %H:%M:%S'))
+                s_t  = TIMEZONE_BRT.localize(datetime.strptime(win_start_prev, '%Y-%m-%d %H:%M:%S'))
+                e_t  = TIMEZONE_BRT.localize(datetime.strptime(win_end_prev,   '%Y-%m-%d %H:%M:%S'))
+                hit_time = bool(s_t <= rs_t <= e_t)
+            except:
+                hit_time = False
 
-            'next': predicted_next.strftime('%H:%M:%S'),
+        # Diferenca entre valor previsto e real
+        value_diff = None
+        if pred_value_prev is not None:
+            value_diff = round(abs(pred_value_prev - last_spike_value), 2)
 
-            'next_ts': predicted_next.strftime('%Y-%m-%d %H:%M:%S'),
+        # Rodadas desde a ocorrencia anterior real
+        rounds_since_prev = None
+        if len(spikes) >= 2:
+            try:
+                last_idx = df_full.index.get_loc(spikes.index[-1])
+                prev_idx = df_full.index.get_loc(spikes.index[-2])
+                rounds_since_prev = int(last_idx - prev_idx)
+            except:
+                rounds_since_prev = int(gaps_rounds.iloc[-1]) if len(gaps_rounds) > 0 else None
 
-            'window': f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}",
+        entry = {
+            'spike_ts':          last_spike_iso,
+            'date':              last_spike_date,
+            'time':              last_spike_str,
+            'real_value':        round(last_spike_value, 2),
+            'rounds_since_prev': rounds_since_prev,
+            'pred_value':        round(pred_value_prev, 2) if pred_value_prev else None,
+            'pred_time':         pred_time_prev,
+            'pred_rounds':       round(pred_rounds_prev) if pred_rounds_prev else None,
+            'win_start_ts':      win_start_prev,
+            'win_end_ts':        win_end_prev,
+            'hit_time':          hit_time,
+            'value_diff':        value_diff,
+        }
 
-            'window_start_ts': early.strftime('%Y-%m-%d %H:%M:%S'),
+        old_history.insert(0, entry)
 
-            'window_end_ts': late.strftime('%Y-%m-%d %H:%M:%S'),
+        old_history = old_history[:10]  # manter apenas as 10 ultimas ocorrencias reais
 
-            'value': pred_value,
-
-            'predicted_gap': pred_gap
-
-        })
-
-        old_history = old_history[:25] # Keep last 25 predictions
-
-        # Save persistence
-
+        # Persistencia em disco
         try:
-
             saved_data = {}
-
             if os.path.exists(hist_file):
-
                 with open(hist_file, "r", encoding="utf-8") as f:
-
                     saved_data = json.load(f)
-
             saved_data[key] = old_history
-
             with open(hist_file, "w", encoding="utf-8") as f:
-
                 json.dump(saved_data, f)
-
         except: pass
 
 
 
     # ============================================================
-
-    # Mtrica de Assertividade Dinmica (com timestamps completos)
-
+    # Metrica de Assertividade: quantos spikes caíram na janela
     # ============================================================
 
-    hits = 0
-
-    evaluated = 0
-
-    for i in range(1, len(old_history)):
-
-        try:
-
-            # A previso [i] dizia: "o PRXIMO spike cair na janela X"
-
-            # O spike que realmente veio depois  registrado em [i-1]
-
-            pred_entry = old_history[i]
-
-            real_entry = old_history[i-1]
-
-
-
-            # Usa timestamps completos (ISO) quando disponveis, seno fallback HH:MM:SS
-
-            if 'spike_ts' in real_entry and 'window_start_ts' in pred_entry:
-
-                # Parse timestamps com timezone de Braslia
-
-                rs_t = TIMEZONE_BRT.localize(datetime.strptime(real_entry['spike_ts'], '%Y-%m-%d %H:%M:%S'))
-
-                s_t = TIMEZONE_BRT.localize(datetime.strptime(pred_entry['window_start_ts'], '%Y-%m-%d %H:%M:%S'))
-
-                e_t = TIMEZONE_BRT.localize(datetime.strptime(pred_entry['window_end_ts'], '%Y-%m-%d %H:%M:%S'))
-
-            else:
-
-                # Fallback legado (entradas antigas sem _ts)
-
-                real_spike_str = real_entry.get('spike_time', '')
-
-                start_str, end_str = pred_entry['window'].split(' -> ')
-
-                rs_t = datetime.strptime(real_spike_str, "%H:%M:%S")
-
-                s_t = datetime.strptime(start_str, "%H:%M:%S")
-
-                e_t = datetime.strptime(end_str, "%H:%M:%S")
-
-                if e_t < s_t:
-
-                    e_t += timedelta(days=1)
-
-                    if rs_t < s_t and rs_t.hour < 12: rs_t += timedelta(days=1)
-
-
-
-            if s_t <= rs_t <= e_t:
-
-                hits += 1
-
-            evaluated += 1
-
-        except: pass
-
-
+    hits     = sum(1 for h in old_history if h.get('hit_time') is True)
+    evaluated = sum(1 for h in old_history if h.get('hit_time') is not None)
 
     accuracy_perc = f"{(hits / evaluated * 100):.0f}%" if evaluated > 0 else "N/A"
 
@@ -1725,11 +1692,15 @@ def analyze_spikes(df_full, threshold, label):
 
         'correlated': is_correlated,
 
-        'accuracy': accuracy_perc, # Porcentual novo
+        'accuracy': accuracy_perc,
 
         'next': predicted_next.strftime('%H:%M:%S'),
 
         'window': f"{early.strftime('%H:%M:%S')} -> {late.strftime('%H:%M:%S')}",
+
+        'window_start_ts': early.strftime('%Y-%m-%d %H:%M:%S'),
+
+        'window_end_ts':   late.strftime('%Y-%m-%d %H:%M:%S'),
 
         'current_oc': len(df_full) - 1 - df_full[df_full["value"] > threshold].index[-1],
 
@@ -2253,6 +2224,14 @@ def dashboard():
 
                         <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
 
+                            <small>Previsao ML (Rodadas)</small><br>
+
+                            <strong style="color:#cc5500;">{{ "%.0f"|format(data.spikes_1500.predicted_gap_rounds) }} rod.</strong>
+
+                        </div>
+
+                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
+
                             <small>Valor Estimado</small><br>
 
                             <strong style="color:#ff6600;">{{ "%.0f"|format(data.spikes_1500.predicted_value) }}x</strong>
@@ -2278,6 +2257,105 @@ def dashboard():
                     </div>
 
                     <p style="margin-top:10px; font-size:12px; color:#888; text-align:center;">Alinhamento ML: <span style="font-weight:bold; color: {{ '#28a745' if data.spikes_1500.correlated else '#dc3545' }}">{{ 'ALINHADO' if data.spikes_1500.correlated else 'DIVERGENTE' }}</span></p>
+
+                    {% if data.spikes_1500.history %}
+
+                    <details style="margin-top:12px;">
+
+                        <summary style="font-size:12px; cursor:pointer; color:#ff6600; outline:none; font-weight:bold;">Ultimas 10 Ocorrencias MEGA SPIKE</summary>
+
+                        <div style="overflow-x:auto; margin-top:6px; border:1px solid #ff6600; border-radius:6px;">
+
+                            <table style="width:100%; border-collapse:collapse; text-align:center; font-size:11px;">
+
+                                <thead style="background:#ff6600; color:#fff;">
+
+                                    <tr>
+
+                                        <th style="padding:5px 4px; white-space:nowrap;">Data/Hora</th>
+
+                                        <th style="padding:5px 4px;">Real</th>
+
+                                        <th style="padding:5px 4px;">Rod. Reais</th>
+
+                                        <th style="padding:5px 4px;">Prev.Valor</th>
+
+                                        <th style="padding:5px 4px;">Diff.</th>
+
+                                        <th style="padding:5px 4px; white-space:nowrap;">Prev.Hora</th>
+
+                                        <th style="padding:5px 4px;">~Rod.Prev.</th>
+
+                                        <th style="padding:5px 4px;">Acerto</th>
+
+                                    </tr>
+
+                                </thead>
+
+                                <tbody>
+
+                                    {% for hist in data.spikes_1500.history %}
+                                    {% if hist.real_value is defined and hist.real_value is not none %}
+                                    {% set row_bg = '#e8f5e9' if hist.hit_time is defined and hist.hit_time == true else ('#ffebee' if hist.hit_time is defined and hist.hit_time == false else '#fff8f0') %}
+
+                                    <tr style="border-bottom:1px solid #ffe0cc; background:{{ row_bg }};">
+
+                                        <td style="padding:4px 5px; font-size:10px; white-space:nowrap;">
+                                            {{ hist.date if hist.date is defined else '-' }}<br><strong>{{ hist.time if hist.time is defined else '-' }}</strong>
+                                        </td>
+
+                                        <td style="padding:4px 5px;">
+                                            <span style="background:#c0392b; color:#fff; border-radius:4px; padding:2px 5px; font-weight:bold; white-space:nowrap;">{{ "%.0f"|format(hist.real_value) }}x</span>
+                                        </td>
+
+                                        <td style="padding:4px 5px; text-align:center;">
+                                            {% if hist.rounds_since_prev is defined and hist.rounds_since_prev %}
+                                                <span style="background:#37474f; color:#fff; border-radius:4px; padding:2px 6px; font-weight:bold;">{{ hist.rounds_since_prev }}</span>
+                                            {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                        </td>
+
+                                        <td style="padding:4px 5px;">
+                                            {% if hist.pred_value is defined and hist.pred_value %}<strong style="color:#e65100;">{{ "%.0f"|format(hist.pred_value) }}x</strong>
+                                            {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                        </td>
+
+                                        <td style="padding:4px 5px;">
+                                            {% if hist.value_diff is defined and hist.value_diff is not none and hist.pred_value is defined and hist.pred_value %}
+                                                {% set pct = (hist.value_diff / hist.pred_value * 100) %}
+                                                <span style="font-weight:bold; color:{{ '#2e7d32' if pct < 50 else '#c62828' }};">{{ "%.0f"|format(hist.value_diff) }}x</span>
+                                            {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                        </td>
+
+                                        <td style="padding:4px 5px; white-space:nowrap;">
+                                            {% if hist.pred_time is defined and hist.pred_time %}<strong style="color:#6a1b9a;">{{ hist.pred_time }}</strong>
+                                            {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                        </td>
+
+                                        <td style="padding:4px 5px;">
+                                            {% if hist.pred_rounds is defined and hist.pred_rounds %}<strong style="color:#00695c;">~{{ hist.pred_rounds }}</strong>
+                                            {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                        </td>
+
+                                        <td style="padding:4px 5px;">
+                                            {% if hist.hit_time is defined and hist.hit_time == true %}<span style="background:#2e7d32; color:#fff; border-radius:10px; padding:2px 7px; font-weight:bold;">SIM</span>
+                                            {% elif hist.hit_time is defined and hist.hit_time == false %}<span style="background:#c62828; color:#fff; border-radius:10px; padding:2px 7px; font-weight:bold;">NAO</span>
+                                            {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                        </td>
+
+                                    </tr>
+
+                                    {% endif %}
+                                    {% endfor %}
+
+                                </tbody>
+
+                            </table>
+
+                        </div>
+
+                    </details>
+
+                    {% endif %}
 
                 </div>
 
@@ -2335,23 +2413,31 @@ def dashboard():
 
                             <details open>
 
-                                <summary style="font-size:12px; cursor:pointer; color:#0056b3; margin-top:10px; outline:none; font-weight:bold;">Histrico (ltimas 25)</summary>
+                                <summary style="font-size:12px; cursor:pointer; color:#0056b3; margin-top:10px; outline:none; font-weight:bold;">Ultimas 10 Ocorrencias</summary>
 
-                                <div style="font-size:11px; margin-top:5px; max-height:180px; overflow-y:auto; border:1px solid #eee; padding:5px; background:#fdfdfd;">
+                                <div style="font-size:11px; margin-top:5px; overflow-x:auto; border:1px solid #eee; border-radius:6px;">
 
-                                    <table style="width:100%; border-collapse: collapse; text-align:left;">
+                                    <table style="width:100%; border-collapse: collapse; text-align:center; font-size:11px;">
 
-                                        <thead>
+                                        <thead style="background:#343a40; color:#fff;">
 
-                                            <tr style="border-bottom:1px solid #ccc; color:#555;">
+                                            <tr>
 
-                                                <th style="padding:2px;">Reg. Previso</th>
+                                                <th style="padding:5px 4px; white-space:nowrap;">Data/Hora</th>
 
-                                                <th style="padding:2px;">Alvo (Valor)</th>
+                                                <th style="padding:5px 4px;">Real</th>
 
-                                                <th style="padding:2px;">Alvo (Hora)</th>
+                                                <th style="padding:5px 4px;">Rod. Reais</th>
 
-                                                <th style="padding:2px;">Janela</th>
+                                                <th style="padding:5px 4px;">Prev.Valor</th>
+
+                                                <th style="padding:5px 4px;">Diff.</th>
+
+                                                <th style="padding:5px 4px; white-space:nowrap;">Prev.Hora</th>
+
+                                                <th style="padding:5px 4px;">~Rod.Prev.</th>
+
+                                                <th style="padding:5px 4px;">Acerto</th>
 
                                             </tr>
 
@@ -2361,17 +2447,66 @@ def dashboard():
 
                                             {% for hist in data[k].history %}
 
-                                            <tr style="border-bottom:1px solid #eee;">
+                                            {% if hist.real_value is defined and hist.real_value is not none %}
 
-                                                <td style="padding:2px; color:#888;">{{ hist.prev_time if hist.prev_time else hist.spike_time }}</td>
+                                            {% set row_bg = '#e8f5e9' if hist.hit_time is defined and hist.hit_time == true else ('#ffebee' if hist.hit_time is defined and hist.hit_time == false else '#fafafa') %}
 
-                                                <td style="padding:2px; font-weight:bold; color:#28a745;">{{ "%.2f"|format(hist.value) }}x</td>
+                                            <tr style="border-bottom:1px solid #e0e0e0; background:{{ row_bg }};">
 
-                                                <td style="padding:2px; font-weight:bold; color:#007bff;">{{ hist.next }}</td>
+                                                <td style="padding:4px 5px; white-space:nowrap; font-size:10px; color:#444;">
+                                                    {{ hist.date if hist.date is defined else '-' }}<br><strong>{{ hist.time if hist.time is defined else '-' }}</strong>
+                                                </td>
 
-                                                <td style="padding:2px; font-size:10px; color:#666;">{{ hist.window.split(' -> ')[0][:5] }} s {{ hist.window.split(' -> ')[1][:5] }}</td>
+                                                <td style="padding:4px 5px;">
+                                                    <span style="background:#e65100; color:#fff; border-radius:4px; padding:2px 6px; font-weight:bold; white-space:nowrap;">{{ "%.1f"|format(hist.real_value) }}x</span>
+                                                </td>
+
+                                                <td style="padding:4px 5px; text-align:center;">
+                                                    {% if hist.rounds_since_prev is defined and hist.rounds_since_prev %}
+                                                        <span style="background:#37474f; color:#fff; border-radius:4px; padding:2px 6px; font-weight:bold;">{{ hist.rounds_since_prev }}</span>
+                                                    {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                                </td>
+
+                                                <td style="padding:4px 5px;">
+                                                    {% if hist.pred_value is defined and hist.pred_value %}
+                                                        <span style="color:#1565c0; font-weight:bold;">{{ "%.1f"|format(hist.pred_value) }}x</span>
+                                                    {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                                </td>
+
+                                                <td style="padding:4px 5px;">
+                                                    {% if hist.value_diff is defined and hist.value_diff is not none and hist.pred_value is defined and hist.pred_value %}
+                                                        {% set pct = (hist.value_diff / hist.pred_value * 100) %}
+                                                        <span style="font-weight:bold; color:{{ '#2e7d32' if pct < 50 else '#c62828' }};">
+                                                            {{ "%.1f"|format(hist.value_diff) }}x
+                                                        </span>
+                                                    {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                                </td>
+
+                                                <td style="padding:4px 5px; white-space:nowrap;">
+                                                    {% if hist.pred_time is defined and hist.pred_time %}
+                                                        <strong style="color:#6a1b9a;">{{ hist.pred_time }}</strong>
+                                                    {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                                </td>
+
+                                                <td style="padding:4px 5px;">
+                                                    {% if hist.pred_rounds is defined and hist.pred_rounds %}
+                                                        <span style="color:#00695c; font-weight:bold;">~{{ hist.pred_rounds }}</span>
+                                                    {% else %}<span style="color:#aaa;">-</span>{% endif %}
+                                                </td>
+
+                                                <td style="padding:4px 5px;">
+                                                    {% if hist.hit_time is defined and hist.hit_time == true %}
+                                                        <span style="background:#2e7d32; color:#fff; border-radius:10px; padding:2px 7px; font-weight:bold;">SIM</span>
+                                                    {% elif hist.hit_time is defined and hist.hit_time == false %}
+                                                        <span style="background:#c62828; color:#fff; border-radius:10px; padding:2px 7px; font-weight:bold;">NAO</span>
+                                                    {% else %}
+                                                        <span style="color:#aaa;">-</span>
+                                                    {% endif %}
+                                                </td>
 
                                             </tr>
+
+                                            {% endif %}
 
                                             {% endfor %}
 
@@ -2399,7 +2534,29 @@ def dashboard():
 
         </div>
 
-
+        <!-- Rodape -->
+        <div style="background:#1a1a2e; color:#ccc; text-align:center; padding:22px 40px; margin-top:10px; font-size:13px; border-top:3px solid #e83e8c;">
+            <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:40px; margin-bottom:14px; align-items:center;">
+                <div>
+                    <p style="margin:0 0 6px 0; color:#ff6600; font-weight:bold; font-size:15px;">&#9992; Bets Suportadas</p>
+                    <a href="https://estrelabet.bet.br/pb/?affid=350091&amp;cxd=ktsbqpepcvewcjeje!liioet"
+                       target="_blank"
+                       style="display:inline-block; background:linear-gradient(135deg,#ff6600,#ff9900); color:#fff; font-weight:bold; padding:8px 18px; border-radius:6px; text-decoration:none; font-size:14px; margin-right:8px;">
+                        &#11088; Estrela Bet
+                    </a>
+                    <span style="color:#aaa; font-size:13px;">Luck Bet &nbsp;|&nbsp; Start Bet</span>
+                </div>
+                <div>
+                    <p style="margin:0 0 4px 0; color:#28a745; font-weight:bold; font-size:15px;">&#128140; Colaboracao</p>
+                    <a href="mailto:marcossan73@hotmail.com" style="color:#4fc3f7; text-decoration:none;">marcossan73@hotmail.com</a>
+                </div>
+                <div>
+                    <p style="margin:0 0 4px 0; color:#e83e8c; font-weight:bold; font-size:15px;">&#128178; Doacoes (PIX)</p>
+                    <span style="color:#fff; font-weight:bold; letter-spacing:0.5px;">marcossan73@jim.com.br</span>
+                </div>
+            </div>
+            <p style="margin:0; font-size:11px; color:#666;">Aviator ML Intelligence &mdash; uso educacional. Aposte com responsabilidade.</p>
+        </div>
 
         <script>
 
@@ -2628,6 +2785,30 @@ def dashboard():
 
 
             window.addEventListener('DOMContentLoaded', () => {
+
+                // ---- Ajuste de fuso: subtrai 5h de todos os horarios HH:MM:SS exibidos ----
+                function shiftTime(timeStr, offsetHours) {
+                    const m = timeStr.match(/(\d{2}):(\d{2}):(\d{2})/);
+                    if (!m) return timeStr;
+                    let h = parseInt(m[1]) + offsetHours;
+                    let min = parseInt(m[2]);
+                    let sec = parseInt(m[3]);
+                    h = ((h % 24) + 24) % 24;
+                    return timeStr.replace(m[0], `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`);
+                }
+                function adjustAllTimes(root, offset) {
+                    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+                    const nodes = [];
+                    let n;
+                    while ((n = walker.nextNode())) nodes.push(n);
+                    nodes.forEach(node => {
+                        if (/\d{2}:\d{2}:\d{2}/.test(node.nodeValue)) {
+                            node.nodeValue = node.nodeValue.replace(/(\d{2}:\d{2}:\d{2})/g, t => shiftTime(t, offset));
+                        }
+                    });
+                }
+                adjustAllTimes(document.body, -5);
+                // ---- fim ajuste fuso ----
 
                 let maxLevel = 0;
 
