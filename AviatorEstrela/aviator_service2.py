@@ -1328,13 +1328,64 @@ def analyze_spikes(df_full, threshold, label):
 
     is_correlated = diff_temo <= 0.35 # Tolerncia de 35% de diferena para validar Alarme
 
+    # ------------------------------------------------------------------
+    # Cross-Calibracao: ancora _tempo e _rounds pela duracao real/rodada
+    # ------------------------------------------------------------------
+    # gap_seconds = gap_rounds * seg_por_rodada
+    # Os dois modelos sao treinados de forma independente e podem divergir.
+    # Calculamos a duracao media recente por rodada (seg/rodada) para
+    # cruzar as previsoes e produzir estimativas mutualmente consistentes.
+    #
+    # Peso adaptativo: quanto mais amostras um modelo tem, mais ele lidera.
+    #   w_tempo  = n_gaps  / (n_gaps + n_rounds)
+    #   w_rounds = n_rounds / (n_gaps + n_rounds)
+    # ------------------------------------------------------------------
+    n_gaps   = max(len(gaps), 1)
+    n_rounds = max(len(gaps_rounds), 1)
 
+    # Duracao por rodada: usa pares validos (mesma sessao, mesmo indice)
+    valid_pairs = pd.DataFrame({'s': gaps.values, 'r': gaps_rounds.values}).dropna()
+    valid_pairs = valid_pairs[valid_pairs['r'] > 0]
 
-    # Utiliza o algoritmo do ML 100% puro sem interferncia de mdias estatsticas (Hibridizao removida)
+    if len(valid_pairs) >= 3:
+        # Mediana das ultimas 10 para capturar ritmo atual do jogo
+        recent_n = min(10, len(valid_pairs))
+        seg_por_rodada_recent = float(np.median(
+            (valid_pairs['s'] / valid_pairs['r']).tail(recent_n)
+        ))
+        seg_por_rodada_hist   = float(np.median(valid_pairs['s'] / valid_pairs['r']))
+        # Blend: 70% recente + 30% historico (adapta ao ritmo atual sem esquecer o padrao)
+        seg_por_rodada = 0.70 * seg_por_rodada_recent + 0.30 * seg_por_rodada_hist
+        # Sanidade: rodada do Aviator raramente sai de 10s-60s
+        seg_por_rodada = float(np.clip(seg_por_rodada, 10.0, 60.0))
+    else:
+        seg_por_rodada = float(gaps.mean() / max(gaps_rounds.mean(), 1)) if len(gaps) > 0 else 20.0
+        seg_por_rodada = float(np.clip(seg_por_rodada, 10.0, 60.0))
 
-    pred_gap = pred_gap_ml
+    # Previsao cruzada: cada ML estima a dimensao do outro
+    pred_time_from_rounds  = pred_gap_rounds_ml * seg_por_rodada   # rodadas -> segundos
+    pred_rounds_from_time  = pred_gap_ml        / seg_por_rodada   # segundos -> rodadas
 
-    pred_gap_rounds = pred_gap_rounds_ml
+    # Pesos adaptativos: modelo com mais amostras recebe peso maior
+    w_tempo  = n_gaps   / (n_gaps + n_rounds)
+    w_rounds = n_rounds / (n_gaps + n_rounds)
+
+    # Resultado final: blend ponderado entre ML proprio + estimativa cruzada
+    pred_gap        = w_tempo  * pred_gap_ml        + w_rounds * pred_time_from_rounds
+    pred_gap_rounds = w_rounds * pred_gap_rounds_ml + w_tempo  * pred_rounds_from_time
+
+    # Garante consistencia interna: se desvio > 40%, ancora pelo mais confiante
+    cross_check_ratio = abs(pred_gap - pred_time_from_rounds) / (pred_gap + 1e-6)
+    if cross_check_ratio > 0.40:
+        # Ancora ambos pela duracao recente usando o modelo com mais amostras como lider
+        if n_gaps >= n_rounds:
+            pred_gap_rounds = pred_gap / seg_por_rodada
+        else:
+            pred_gap = pred_gap_rounds * seg_por_rodada
+
+    log(f"[CROSS-CAL] {label}: {seg_por_rodada:.1f}s/rod | "
+        f"ML_tempo={pred_gap_ml:.0f}s ML_rounds={pred_gap_rounds_ml:.0f}rod | "
+        f"Final={pred_gap:.0f}s / {pred_gap_rounds:.0f}rod")
 
 
 
@@ -1679,6 +1730,12 @@ def analyze_spikes(df_full, threshold, label):
         'predicted_gap': pred_gap / 60,
 
         'predicted_gap_rounds': pred_gap_rounds,
+
+        'predicted_gap_ml_raw': pred_gap_ml / 60,
+
+        'predicted_rounds_ml_raw': pred_gap_rounds_ml,
+
+        'seg_por_rodada': round(seg_por_rodada, 1),
 
         'predicted_value': pred_value,
 
@@ -2196,75 +2253,87 @@ def dashboard():
 
                         <div style="flex:1; padding:10px; border:1px solid #ff6600; border-radius:8px; text-align:center; background:#fff3e0;">
 
-                            <p><strong>Total Historico:</strong> {{ data.spikes_1500.total }} ocorrencias</p>
+                                <p><strong>Total Historico:</strong> {{ data.spikes_1500.total }} ocorrencias</p>
 
-                            <p><strong>Gap Medio:</strong> {{ "%.0f"|format(data.spikes_1500.mean_gap) }} min / {{ "%.0f"|format(data.spikes_1500.mean_gap_rounds) }} rodadas</p>
+                                    <p><strong>Gap Medio:</strong> {{ "%.0f"|format(data.spikes_1500.mean_gap) }} min / {{ "%.0f"|format(data.spikes_1500.mean_gap_rounds) }} rodadas</p>
 
-                        </div>
+                                    <p style="margin:4px 0;"><strong>Durao/Rodada:</strong>
+                                        <span style="background:#ff6600;color:#fff;border-radius:4px;padding:2px 7px;font-size:12px;">
+                                            {{ data.spikes_1500.seg_por_rodada if data.spikes_1500.seg_por_rodada else '-' }}s/rod
+                                        </span>
+                                    </p>
 
-                    </div>
+                                </div>
 
-                    <div style="background:#ff6600; color:#fff; border-radius:8px; padding:12px; text-align:center; margin-bottom:10px;">
+                            </div>
 
-                        <strong>Previsao Proximo MEGA SPIKE:</strong><br>
+                            <div style="background:#ff6600; color:#fff; border-radius:8px; padding:12px; text-align:center; margin-bottom:10px;">
 
-                        <span style="font-size:22px; font-weight:bold;">{{ data.spikes_1500.next }}</span><br>
+                                <strong>Previsao Proximo MEGA SPIKE:</strong><br>
 
-                        <span style="font-size:12px;">Janela: {{ data.spikes_1500.window }}</span>
+                                <span style="font-size:22px; font-weight:bold;">{{ data.spikes_1500.next }}</span><br>
 
-                    </div>
+                                <span style="font-size:12px;">Janela: {{ data.spikes_1500.window }}</span>
 
-                    <div style="display:flex; gap:10px; text-align:center;">
+                            </div>
 
-                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
+                            <div style="background:#fff3e0;border-radius:8px;padding:10px;margin-bottom:8px;border-left:4px solid #ff6600;">
+                                <div style="font-size:11px;color:#555;font-weight:bold;margin-bottom:6px;">&#127919; Previsao Calibrada (Cross-Calibracao)</div>
+                                <div style="display:flex;gap:10px;text-align:center;">
+                                    <div style="flex:1;background:#fff;border-radius:6px;padding:8px;">
+                                        <small>Tempo Calibrado</small><br>
+                                        <strong style="color:#cc5500;font-size:15px;">{{ "%.0f"|format(data.spikes_1500.predicted_gap) }} min</strong>
+                                    </div>
+                                    <div style="flex:1;background:#fff;border-radius:6px;padding:8px;">
+                                        <small>Rodadas Calibradas</small><br>
+                                        <strong style="color:#6a1b9a;font-size:15px;">{{ "%.0f"|format(data.spikes_1500.predicted_gap_rounds) }} rod</strong>
+                                    </div>
+                                    <div style="flex:1;background:#fff;border-radius:6px;padding:8px;">
+                                        <small>ML Bruto Tempo</small><br>
+                                        <small style="color:#888;">{{ "%.0f"|format(data.spikes_1500.predicted_gap_ml_raw) }} min</small>
+                                    </div>
+                                    <div style="flex:1;background:#fff;border-radius:6px;padding:8px;">
+                                        <small>ML Bruto Rodadas</small><br>
+                                        <small style="color:#888;">{{ "%.0f"|format(data.spikes_1500.predicted_rounds_ml_raw) }} rod</small>
+                                    </div>
+                                </div>
+                            </div>
 
-                            <small>Previsao ML (Tempo)</small><br>
+                            <div style="display:flex; gap:10px; text-align:center;">
 
-                            <strong>{{ "%.0f"|format(data.spikes_1500.predicted_gap) }} min</strong>
+                                <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
 
-                        </div>
+                                    <small>Valor Estimado</small><br>
 
-                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
+                                    <strong style="color:#ff6600;">{{ "%.0f"|format(data.spikes_1500.predicted_value) }}x</strong>
 
-                            <small>Previsao ML (Rodadas)</small><br>
+                                </div>
 
-                            <strong style="color:#cc5500;">{{ "%.0f"|format(data.spikes_1500.predicted_gap_rounds) }} rod.</strong>
+                                <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
 
-                        </div>
+                                    <small>Assertividade Recente (25)</small><br>
 
-                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
+                                    <strong style="color:#0056b3;">{{ data.spikes_1500.accuracy }}</strong>
 
-                            <small>Valor Estimado</small><br>
+                                </div>
 
-                            <strong style="color:#ff6600;">{{ "%.0f"|format(data.spikes_1500.predicted_value) }}x</strong>
+                                <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
 
-                        </div>
+                                    <small>Acumulada Total</small><br>
 
-                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
+                                    <strong style="color:#1a7a1a;">{{ data.spikes_1500.accuracy_total if data.spikes_1500.accuracy_total else 'N/A' }}</strong>
 
-                            <small>Assertividade Recente (25)</small><br>
+                                </div>
 
-                            <strong style="color:#0056b3;">{{ data.spikes_1500.accuracy }}</strong>
+                                <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
 
-                        </div>
+                                    <small>Desde Ultimo</small><br>
 
-                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
+                                    <strong>{{ data.spikes_1500.current_oc }} rodadas</strong>
 
-                            <small>Acumulada Total</small><br>
+                                </div>
 
-                            <strong style="color:#1a7a1a;">{{ data.spikes_1500.accuracy_total if data.spikes_1500.accuracy_total else 'N/A' }}</strong>
-
-                        </div>
-
-                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
-
-                            <small>Desde Ultimo</small><br>
-
-                            <strong>{{ data.spikes_1500.current_oc }} rodadas</strong>
-
-                        </div>
-
-                    </div>
+                            </div>
 
                     <p style="margin-top:10px; font-size:12px; color:#888; text-align:center;">Alinhamento ML: <span style="font-weight:bold; color: {{ '#28a745' if data.spikes_1500.correlated else '#dc3545' }}">{{ 'ALINHADO' if data.spikes_1500.correlated else 'DIVERGENTE' }}</span></p>
 
@@ -2421,9 +2490,36 @@ def dashboard():
 
                             </div>
 
-                            <p><strong>Gap Mdio:</strong>
+                            <p><strong>Gap Mdio:</strong> {{ "%.2f"|format(data[k].mean_gap) }} min / {{ "%.0f"|format(data[k].mean_gap_rounds) }} rodadas</p>
 
-                            <p><strong>Previso ML (Tempo):</strong> {{ "%.2f"|format(data[k].predicted_gap) }} min / {{ "%.0f"|format(data[k].predicted_gap_rounds) }} rodadas</p>
+                            <p>
+                                <strong>Durao/Rodada:</strong>
+                                <span style="background:#343a40;color:#fff;border-radius:4px;padding:2px 7px;font-size:12px;">
+                                    {{ data[k].seg_por_rodada if data[k].seg_por_rodada else '-' }}s/rod
+                                </span>
+                            </p>
+
+                            <div style="background:#f0f4ff;border-radius:8px;padding:10px;margin-bottom:6px;border-left:4px solid #0056b3;">
+                                <div style="font-size:11px;color:#555;font-weight:bold;margin-bottom:4px;">&#127919; Previso Calibrada (Cross-Calibrao)</div>
+                                <div style="display:flex;gap:8px;">
+                                    <div style="flex:1;text-align:center;">
+                                        <div style="font-size:10px;color:#777;">Tempo</div>
+                                        <strong style="color:#0056b3;font-size:14px;">{{ "%.1f"|format(data[k].predicted_gap) }} min</strong>
+                                    </div>
+                                    <div style="flex:1;text-align:center;">
+                                        <div style="font-size:10px;color:#777;">Rodadas</div>
+                                        <strong style="color:#6a1b9a;font-size:14px;">{{ "%.0f"|format(data[k].predicted_gap_rounds) }} rod</strong>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="background:#fafafa;border-radius:6px;padding:6px 10px;margin-bottom:6px;border-left:3px solid #aaa;">
+                                <div style="font-size:10px;color:#999;margin-bottom:2px;">ML Bruto (antes da calibrao)</div>
+                                <span style="font-size:11px;color:#888;">
+                                    Tempo: {{ "%.1f"|format(data[k].predicted_gap_ml_raw) }} min &nbsp;|&nbsp;
+                                    Rodadas: {{ "%.0f"|format(data[k].predicted_rounds_ml_raw) }} rod
+                                </span>
+                            </div>
 
                             <p><strong>Previso ML (Valor):</strong> <span style="color:#28a745;font-weight:bold;">{{ "%.2f"|format(data[k].predicted_value) }}x</span></p>
 
