@@ -1332,60 +1332,79 @@ def analyze_spikes(df_full, threshold, label):
     # Cross-Calibracao: ancora _tempo e _rounds pela duracao real/rodada
     # ------------------------------------------------------------------
     # gap_seconds = gap_rounds * seg_por_rodada
-    # Os dois modelos sao treinados de forma independente e podem divergir.
-    # Calculamos a duracao media recente por rodada (seg/rodada) para
-    # cruzar as previsoes e produzir estimativas mutualmente consistentes.
     #
-    # Peso adaptativo: quanto mais amostras um modelo tem, mais ele lidera.
-    #   w_tempo  = n_gaps  / (n_gaps + n_rounds)
-    #   w_rounds = n_rounds / (n_gaps + n_rounds)
+    # Estrategia:
+    #   1. Calcula seg_por_rodada pela mediana das ultimas observacoes
+    #   2. Usa CV MAE de cada modelo como peso (modelo melhor = peso maior)
+    #      Se sem CV MAE, usa 50/50
+    #   3. pred_gap (segundos) e o OUTPUT PRIMARIO - e o que define a janela
+    #   4. pred_gap_rounds = pred_gap / seg_por_rodada (sempre consistente)
     # ------------------------------------------------------------------
-    n_gaps   = max(len(gaps), 1)
-    n_rounds = max(len(gaps_rounds), 1)
 
-    # Duracao por rodada: usa pares validos (mesma sessao, mesmo indice)
+    # -- 1. Calcula seg_por_rodada --
     valid_pairs = pd.DataFrame({'s': gaps.values, 'r': gaps_rounds.values}).dropna()
     valid_pairs = valid_pairs[valid_pairs['r'] > 0]
 
     if len(valid_pairs) >= 3:
-        # Mediana das ultimas 10 para capturar ritmo atual do jogo
         recent_n = min(10, len(valid_pairs))
         seg_por_rodada_recent = float(np.median(
             (valid_pairs['s'] / valid_pairs['r']).tail(recent_n)
         ))
-        seg_por_rodada_hist   = float(np.median(valid_pairs['s'] / valid_pairs['r']))
-        # Blend: 70% recente + 30% historico (adapta ao ritmo atual sem esquecer o padrao)
+        seg_por_rodada_hist = float(np.median(valid_pairs['s'] / valid_pairs['r']))
+        # 70% ritmo recente + 30% historico
         seg_por_rodada = 0.70 * seg_por_rodada_recent + 0.30 * seg_por_rodada_hist
-        # Sanidade: rodada do Aviator raramente sai de 10s-60s
-        seg_por_rodada = float(np.clip(seg_por_rodada, 10.0, 60.0))
     else:
         seg_por_rodada = float(gaps.mean() / max(gaps_rounds.mean(), 1)) if len(gaps) > 0 else 20.0
-        seg_por_rodada = float(np.clip(seg_por_rodada, 10.0, 60.0))
+    seg_por_rodada = float(np.clip(seg_por_rodada, 10.0, 60.0))
 
-    # Previsao cruzada: cada ML estima a dimensao do outro
-    pred_time_from_rounds  = pred_gap_rounds_ml * seg_por_rodada   # rodadas -> segundos
-    pred_rounds_from_time  = pred_gap_ml        / seg_por_rodada   # segundos -> rodadas
+    # -- 2. Converte pred_rounds para segundos para comparacao na mesma unidade --
+    pred_time_from_rounds = pred_gap_rounds_ml * seg_por_rodada
 
-    # Pesos adaptativos: modelo com mais amostras recebe peso maior
-    w_tempo  = n_gaps   / (n_gaps + n_rounds)
-    w_rounds = n_rounds / (n_gaps + n_rounds)
+    # -- 3. Calcula pesos baseados no CV MAE de cada modelo (menor MAE = mais confiavel) --
+    mae_tempo  = _model_cache.get(label + "_tempo",  {}).get('cv_mae', None)
+    mae_rounds = _model_cache.get(label + "_rounds", {}).get('cv_mae', None)
 
-    # Resultado final: blend ponderado entre ML proprio + estimativa cruzada
-    pred_gap        = w_tempo  * pred_gap_ml        + w_rounds * pred_time_from_rounds
-    pred_gap_rounds = w_rounds * pred_gap_rounds_ml + w_tempo  * pred_rounds_from_time
+    if mae_tempo is not None and mae_rounds is not None and mae_tempo > 0 and mae_rounds > 0:
+        # Converte MAE de rounds para segundos para comparar na mesma unidade
+        mae_rounds_sec = mae_rounds * seg_por_rodada
+        inv_t = 1.0 / (mae_tempo + 1e-6)
+        inv_r = 1.0 / (mae_rounds_sec + 1e-6)
+        w_tempo  = inv_t / (inv_t + inv_r)
+        w_rounds = inv_r / (inv_t + inv_r)
+        peso_origem = f"MAE(t={mae_tempo:.1f}s r={mae_rounds_sec:.1f}s)"
+    else:
+        w_tempo  = 0.5
+        w_rounds = 0.5
+        peso_origem = "50/50 (sem CV MAE)"
 
-    # Garante consistencia interna: se desvio > 40%, ancora pelo mais confiante
-    cross_check_ratio = abs(pred_gap - pred_time_from_rounds) / (pred_gap + 1e-6)
-    if cross_check_ratio > 0.40:
-        # Ancora ambos pela duracao recente usando o modelo com mais amostras como lider
-        if n_gaps >= n_rounds:
-            pred_gap_rounds = pred_gap / seg_por_rodada
+    # -- 4. Verifica divergencia pre-blend: compara os dois MLs em segundos --
+    divergence = abs(pred_gap_ml - pred_time_from_rounds) / (max(pred_gap_ml, pred_time_from_rounds) + 1e-6)
+
+    if divergence > 0.50:
+        # Divergencia alta (>50%): ancora pelo modelo mais confiavel, descarta o outro
+        if mae_tempo is not None and mae_rounds is not None:
+            if mae_tempo <= (mae_rounds * seg_por_rodada):
+                pred_gap = pred_gap_ml                # tempo e mais preciso, usa direto
+                ancora = "tempo"
+            else:
+                pred_gap = pred_time_from_rounds      # rounds e mais preciso, converte
+                ancora = "rounds"
         else:
-            pred_gap = pred_gap_rounds * seg_por_rodada
+            pred_gap = w_tempo * pred_gap_ml + w_rounds * pred_time_from_rounds
+            ancora = "blend-50/50"
+        log(f"[CROSS-CAL] {label}: divergencia={divergence:.0%} ALTA -> ancora={ancora}")
+    else:
+        # Divergencia aceitavel: blend ponderado pelo MAE
+        pred_gap = w_tempo * pred_gap_ml + w_rounds * pred_time_from_rounds
+        log(f"[CROSS-CAL] {label}: divergencia={divergence:.0%} OK | {peso_origem} "
+            f"| w_t={w_tempo:.2f} w_r={w_rounds:.2f} "
+            f"| ML_t={pred_gap_ml:.0f}s ML_r={pred_time_from_rounds:.0f}s -> {pred_gap:.0f}s")
 
-    log(f"[CROSS-CAL] {label}: {seg_por_rodada:.1f}s/rod | "
-        f"ML_tempo={pred_gap_ml:.0f}s ML_rounds={pred_gap_rounds_ml:.0f}rod | "
-        f"Final={pred_gap:.0f}s / {pred_gap_rounds:.0f}rod")
+    # -- 5. pred_gap_rounds e SEMPRE derivado de pred_gap para garantir consistencia --
+    # Isso garante: pred_gap == pred_gap_rounds * seg_por_rodada (matematicamente exato)
+    pred_gap_rounds = pred_gap / seg_por_rodada
+
+    log(f"[CROSS-CAL] {label}: {seg_por_rodada:.1f}s/rod | Final={pred_gap:.0f}s / {pred_gap_rounds:.0f}rod")
 
 
 
@@ -2514,10 +2533,11 @@ def dashboard():
                             </div>
 
                             <div style="background:#fafafa;border-radius:6px;padding:6px 10px;margin-bottom:6px;border-left:3px solid #aaa;">
-                                <div style="font-size:10px;color:#999;margin-bottom:2px;">ML Bruto (antes da calibrao)</div>
+                                <div style="font-size:10px;color:#999;margin-bottom:2px;">ML Bruto (antes da calibrao) &mdash; Rodadas = output direto do modelo _rounds</div>
                                 <span style="font-size:11px;color:#888;">
                                     Tempo: {{ "%.1f"|format(data[k].predicted_gap_ml_raw) }} min &nbsp;|&nbsp;
-                                    Rodadas: {{ "%.0f"|format(data[k].predicted_rounds_ml_raw) }} rod
+                                    Rodadas ML: {{ "%.0f"|format(data[k].predicted_rounds_ml_raw) }} rod
+                                    &nbsp;<span style="color:#aaa;">(derivado calibrado: {{ "%.0f"|format(data[k].predicted_gap_rounds) }} rod)</span>
                                 </span>
                             </div>
 
