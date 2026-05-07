@@ -1710,13 +1710,44 @@ def analyze_spikes(df_full, threshold, label):
 
 
     # ============================================================
-    # Metrica de Assertividade: quantos spikes caíram na janela
+    # Metrica de Assertividade: janela recente + acumulado total
     # ============================================================
 
-    hits     = sum(1 for h in old_history if h.get('hit_time') is True)
-    evaluated = sum(1 for h in old_history if h.get('hit_time') is not None)
+    # --- Assertividade Recente: ultimas 25 entradas avaliadas ---
+    evaluated_entries = [h for h in old_history if h.get('hit_time') is not None]
+    recent_25   = evaluated_entries[:25]
+    hits_recent = sum(1 for h in recent_25 if h.get('hit_time') is True)
+    acc_recent  = f"{hits_recent}/{len(recent_25)} ({hits_recent/len(recent_25)*100:.0f}%)" if recent_25 else "N/A"
 
-    accuracy_perc = f"{(hits / evaluated * 100):.0f}%" if evaluated > 0 else "N/A"
+    # --- Assertividade Acumulada: carrega e atualiza ACCURACY_LOG ---
+    acc_data = {}
+    if os.path.exists(ACCURACY_LOG):
+        try:
+            with open(ACCURACY_LOG, "r", encoding="utf-8") as f:
+                acc_data = json.load(f)
+        except: pass
+
+    acc_entry = acc_data.get(key, {'total_hits': 0, 'total_evaluated': 0, 'last_spike_ts': None})
+
+    # Atualiza acumulador apenas se o spike atual e novo (nao foi contado antes)
+    new_entry = old_history[0] if old_history else None
+    if (new_entry
+            and new_entry.get('hit_time') is not None
+            and new_entry.get('spike_ts') != acc_entry.get('last_spike_ts')):
+        acc_entry['total_evaluated'] += 1
+        if new_entry.get('hit_time') is True:
+            acc_entry['total_hits'] += 1
+        acc_entry['last_spike_ts'] = new_entry.get('spike_ts')
+        acc_data[key] = acc_entry
+        try:
+            with open(ACCURACY_LOG, "w", encoding="utf-8") as f:
+                json.dump(acc_data, f)
+        except: pass
+
+    total_hits      = acc_entry.get('total_hits', 0)
+    total_evaluated = acc_entry.get('total_evaluated', 0)
+    acc_total   = f"{total_hits}/{total_evaluated} ({total_hits/total_evaluated*100:.0f}%)" if total_evaluated > 0 else "N/A"
+    accuracy_perc = acc_recent
 
 
 
