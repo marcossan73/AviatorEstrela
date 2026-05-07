@@ -1624,7 +1624,7 @@ def analyze_spikes(df_full, threshold, label):
 
         old_history.insert(0, entry)
 
-        old_history = old_history[:10]  # manter apenas as 10 ultimas ocorrencias reais
+        old_history = old_history[:50]  # manter as 50 ultimas ocorrencias reais
 
         # Persistencia em disco
         try:
@@ -1693,6 +1693,8 @@ def analyze_spikes(df_full, threshold, label):
         'correlated': is_correlated,
 
         'accuracy': accuracy_perc,
+
+        'accuracy_total': acc_total,
 
         'next': predicted_next.strftime('%H:%M:%S'),
 
@@ -2240,9 +2242,17 @@ def dashboard():
 
                         <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
 
-                            <small>Assertividade</small><br>
+                            <small>Assertividade Recente (25)</small><br>
 
                             <strong style="color:#0056b3;">{{ data.spikes_1500.accuracy }}</strong>
+
+                        </div>
+
+                        <div style="flex:1; background:#f8f9fa; border-radius:6px; padding:8px;">
+
+                            <small>Acumulada Total</small><br>
+
+                            <strong style="color:#1a7a1a;">{{ data.spikes_1500.accuracy_total if data.spikes_1500.accuracy_total else 'N/A' }}</strong>
 
                         </div>
 
@@ -2391,9 +2401,27 @@ def dashboard():
 
                             </div>
 
-                            <p><strong>Assertividade ML:</strong> <span style="font-weight:bold; color:#0056b3;">{{ data[k].accuracy }}</span></p>
+                            <div style="display:flex; gap:8px; margin-bottom:8px;">
 
-                            <p><strong>Gap Mdio:</strong> {{ "%.2f"|format(data[k].mean_gap) }} min / {{ "%.0f"|format(data[k].mean_gap_rounds) }} rodadas</p>
+                                <div style="flex:1; background:#e8f4fd; border-radius:6px; padding:6px; text-align:center;">
+
+                                    <small style="color:#555;">Assertividade Recente (25)</small><br>
+
+                                    <strong style="color:#0056b3; font-size:15px;">{{ data[k].accuracy }}</strong>
+
+                                </div>
+
+                                <div style="flex:1; background:#e8f8e8; border-radius:6px; padding:6px; text-align:center;">
+
+                                    <small style="color:#555;">Acumulada Total</small><br>
+
+                                    <strong style="color:#1a7a1a; font-size:15px;">{{ data[k].accuracy_total if data[k].accuracy_total else 'N/A' }}</strong>
+
+                                </div>
+
+                            </div>
+
+                            <p><strong>Gap Mdio:</strong>
 
                             <p><strong>Previso ML (Tempo):</strong> {{ "%.2f"|format(data[k].predicted_gap) }} min / {{ "%.0f"|format(data[k].predicted_gap_rounds) }} rodadas</p>
 
@@ -2413,7 +2441,7 @@ def dashboard():
 
                             <details open>
 
-                                <summary style="font-size:12px; cursor:pointer; color:#0056b3; margin-top:10px; outline:none; font-weight:bold;">Ultimas 10 Ocorrencias</summary>
+                                <summary style="font-size:12px; cursor:pointer; color:#0056b3; margin-top:10px; outline:none; font-weight:bold;">Ultimas 50 Ocorrencias</summary>
 
                                 <div style="font-size:11px; margin-top:5px; overflow-x:auto; border:1px solid #eee; border-radius:6px;">
 
